@@ -78,8 +78,8 @@ class RoleAccessMiddleware(BaseMiddleware):
         if callback_query and hasattr(callback_query, "data") and callback_query.data:
             callback_data_raw = callback_query.data
 
-        # Always allow /start
-        if text.startswith("/start"):
+        # Always allow /start and /menu
+        if text.startswith(("/start", "/menu")):
             return await handler(event, data)
 
         # Always allow registration & admin approval callbacks
