@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+.ruff_cache
+.mypy_cache
+.pytest_cache
+.DS_Store
+docs/
+logs/
+*.md
+Makefile
+.env
+.env.example
