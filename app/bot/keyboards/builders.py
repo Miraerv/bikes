@@ -654,6 +654,7 @@ def analytics_menu_kb() -> InlineKeyboardMarkup:
         text="✅ Аккуратные курьеры",
         callback_data=AnalyticsMenuCB(action="careful_couriers"),
     )
+    b.button(text="← Назад", callback_data=AnalyticsMenuCB(action="back"))
     b.adjust(2, 2, 2, 1)
     return b.as_markup()
 
