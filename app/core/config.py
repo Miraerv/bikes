@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # — Logging —
     log_level: str = "INFO"
 
+    # — Internal API —
+    api_port: int = 8080
+    api_token: str = ""
+
     # — Admin —
     admin_telegram_id: int = 1917662916
 

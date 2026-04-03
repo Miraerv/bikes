@@ -11,6 +11,7 @@ version = "0.1.0"
 description = "Production Telegram bot for Bikes"
 requires-python = ">=3.14"
 dependencies = [
+    "aiohttp>=3.9,<4",
     "aiogram>=3.15,<4",
     "sqlalchemy[asyncio]>=2.0,<3",
     "asyncmy>=0.2,<1",
