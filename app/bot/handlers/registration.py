@@ -22,7 +22,7 @@ from app.bot.keyboards.callbacks import (
     RegistrationCB,
 )
 from app.bot.states.bike import RegistrationForm
-from app.core.config import settings
+from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
 from app.db.models.admin_user import AdminUser
 from app.db.models.bot_user import ROLE_LABEL, BotUser, UserRole
 
@@ -242,14 +242,24 @@ async def reg_contact(
     # 4. Notify admin
     tg_username = message.from_user.username or ""  # type: ignore[union-attr]
     tg_link = f"@{tg_username}" if tg_username else f"<code>{phone_raw}</code>"
-    await bot.send_message(
-        settings.admin_telegram_id,
-        f"🆕 <b>Новая заявка на доступ</b>\n\n"
+    admin_message = (
+        "🆕 <b>Новая заявка на доступ</b>\n\n"
         f"👤 Имя: <b>{name}</b>\n"
         f"📱 Телефон: <code>{phone_raw}</code>\n"
-        f"💬 Telegram: {tg_link}",
-        reply_markup=_approval_kb(bot_user.id),
+        f"💬 Telegram: {tg_link}"
     )
+    for tg_admin_id in await get_admin_telegram_ids(market_session):
+        try:
+            await bot.send_message(
+                tg_admin_id,
+                admin_message,
+                reply_markup=_approval_kb(bot_user.id),
+            )
+        except Exception:
+            logger.warning(
+                "Could not notify admin tg_id={tg_id} about registration",
+                tg_id=tg_admin_id,
+            )
 
 
 @router.message(RegistrationForm.name, F.text)
@@ -272,9 +282,10 @@ async def admin_approve(
     callback: CallbackQuery,
     callback_data: AdminApprovalCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Admin approves — show role selection."""
-    if callback.from_user.id != settings.admin_telegram_id:
+    if not is_admin_actor(bot_user, callback.from_user.id):
         await callback.answer("⛔️ Только администратор может одобрять заявки.")
         return
 
@@ -299,9 +310,10 @@ async def admin_reject(
     callback_data: AdminApprovalCB,
     market_session: AsyncSession,
     bot: Bot,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Admin rejects the application."""
-    if callback.from_user.id != settings.admin_telegram_id:
+    if not is_admin_actor(bot_user, callback.from_user.id):
         await callback.answer("⛔️ Только администратор может отклонять заявки.")
         return
 
@@ -339,9 +351,10 @@ async def admin_assign_role(
     callback_data: AdminRoleSelectCB,
     market_session: AsyncSession,
     bot: Bot,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Admin assigns a specific role."""
-    if callback.from_user.id != settings.admin_telegram_id:
+    if not is_admin_actor(bot_user, callback.from_user.id):
         await callback.answer("⛔️ Только администратор.")
         return
 

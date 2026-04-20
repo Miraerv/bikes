@@ -12,10 +12,11 @@ from aiohttp import web
 from loguru import logger
 from sqlalchemy import select, text
 
+from app.core.admin_access import get_admin_telegram_ids
 from app.core.config import settings
 from app.db.base import market_session_maker
 from app.db.models.admin_user import AdminUser
-from app.db.models.bot_user import BotUser, UserRole
+from app.db.models.bot_user import BotUser
 from app.db.models.courier_shift import CourierShift
 
 if TYPE_CHECKING:
@@ -28,17 +29,6 @@ def _check_auth(request: web.Request) -> bool:
     if not auth.startswith("Bearer "):
         return False
     return auth[7:] == settings.api_token
-
-
-async def _get_telegram_ids_by_roles(
-    roles: list[str],
-) -> list[int]:
-    """Fetch telegram_ids of users with given roles."""
-    async with market_session_maker() as session:
-        result = await session.execute(
-            select(BotUser.telegram_id).where(BotUser.role.in_(roles)),
-        )
-        return [row[0] for row in result.all()]
 
 
 async def _get_courier_telegram_id(admin_user_id: int) -> int | None:
@@ -146,7 +136,8 @@ async def _handle_shift_ended(bot: Bot, payload: dict) -> None:
         msg += "📊 SLA: <b>—</b>"
 
     # TODO: добавить курьера и супервайзеров после тестирования
-    recipients: list[int] = [settings.admin_telegram_id]
+    async with market_session_maker() as session:
+        recipients = await get_admin_telegram_ids(session)
 
     for tg_id in recipients:
         try:
