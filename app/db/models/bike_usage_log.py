@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, func

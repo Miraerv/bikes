@@ -59,6 +59,7 @@ class RegistrationForm(StatesGroup):
     """FSM for new user registration."""
 
     name = State()
+    supervisor_stores = State()
 
 
 class CourierShiftForm(StatesGroup):

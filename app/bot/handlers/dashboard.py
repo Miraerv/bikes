@@ -16,7 +16,7 @@ from app.bot.keyboards.builders import (
     main_menu_kb,
 )
 from app.bot.keyboards.callbacks import DashboardMenuCB, DashboardStoreCB
-from app.core.config import settings
+from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
 from app.db.models.bike import Bike, BikeStatus
 from app.db.models.bike_repair import BikeRepair
 from app.db.models.bike_usage_log import BikeUsageLog
@@ -25,6 +25,8 @@ from app.db.models.store import Store
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="dashboard")
 
@@ -35,9 +37,14 @@ router = Router(name="dashboard")
 async def _get_status_counts(
     session: AsyncSession,
     store_id: int | None = None,
+    bot_user: BotUser | None = None,
 ) -> dict[str, int]:
     """Return {status_value: count} dict.  If store_id is given, filter by it."""
-    query = select(Bike.status, func.count(Bike.id)).group_by(Bike.status)
+    query = apply_store_scope(
+        select(Bike.status, func.count(Bike.id)).group_by(Bike.status),
+        Bike.store_id,
+        bot_user,
+    )
     if store_id is not None:
         query = query.where(Bike.store_id == store_id)
     result = await session.execute(query)
@@ -46,20 +53,17 @@ async def _get_status_counts(
 
 async def _get_stores_with_counts(
     session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> list[tuple[Store, dict[str, int]]]:
     """Return list of (Store, counts_dict) sorted by display_name."""
-    # Fetch express stores
-    stores_result = await session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(stores_result.scalars().all())
+    stores = await get_accessible_stores(session, bot_user)
 
     # Aggregate counts per store
-    query = (
+    query = apply_store_scope(
         select(Bike.store_id, Bike.status, func.count(Bike.id))
-        .group_by(Bike.store_id, Bike.status)
+        .group_by(Bike.store_id, Bike.status),
+        Bike.store_id,
+        bot_user,
     )
     result = await session.execute(query)
 
@@ -93,12 +97,13 @@ def _format_overall(counts: dict[str, int]) -> str:
 async def open_dashboard(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show overall fleet statistics with per-store buttons."""
     await callback.answer()
 
-    counts = await _get_status_counts(market_session)
-    stores_data = await _get_stores_with_counts(market_session)
+    counts = await _get_status_counts(market_session, bot_user=bot_user)
+    stores_data = await _get_stores_with_counts(market_session, bot_user=bot_user)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         _format_overall(counts),
@@ -124,8 +129,11 @@ async def store_detail(
     callback: CallbackQuery,
     callback_data: DashboardStoreCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show per-store bike stats + active shifts & repairs."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
 
     store_id = callback_data.store_id
@@ -138,7 +146,7 @@ async def store_detail(
     store_name = store.display_name if store else f"#{store_id}"
 
     # Bike counts by status
-    counts = await _get_status_counts(market_session, store_id=store_id)
+    counts = await _get_status_counts(market_session, store_id=store_id, bot_user=bot_user)
     total = sum(counts.values())
 
     # Active shifts (ended_at IS NULL)

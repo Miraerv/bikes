@@ -140,6 +140,7 @@ boom_bike_bot_roles  │    boom_shift_couriers ──► boom_shift_couriers_bi
 | `admin_user_id` | bigint, nullable | Связь с `boom_admin_users` |
 | `name` | varchar(255) | Имя пользователя |
 | `role` | varchar(20) | Роль в боте |
+| `store_ids` | varchar(255), nullable | JSON-массив ID складов для супервайзера |
 | `created_at` / `updated_at` | timestamp | |
 
 **Роли:**
@@ -157,6 +158,7 @@ boom_bike_bot_roles  │    boom_shift_couriers ──► boom_shift_couriers_bi
 2. Бот ищет в `boom_admin_users` по `phone` → привязывает `admin_user_id`
 3. Создаёт запись с `role=pending`
 4. Админ одобряет + выбирает роль
+5. Для роли `supervisor` дополнительно выбирает доступные склады
 
 ---
 

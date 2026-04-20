@@ -10,11 +10,14 @@ from sqlalchemy import select
 
 from app.bot.keyboards.builders import bike_menu_kb, confirm_decommission_kb
 from app.bot.keyboards.callbacks import BikeDecommissionCB
+from app.core.store_access import has_store_access
 from app.db.models.bike import Bike, BikeStatus
 
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="decommission")
 
@@ -24,6 +27,7 @@ async def ask_decommission(
     callback: CallbackQuery,
     callback_data: BikeDecommissionCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Ask for confirmation before decommissioning."""
     await callback.answer()
@@ -35,6 +39,10 @@ async def ask_decommission(
 
     if bike is None:
         await callback.message.edit_text("⚠️ Байк не найден.")  # type: ignore[union-attr]
+        return
+
+    if not has_store_access(bot_user, bike.store_id):
+        await callback.answer("⛔️ У вас нет доступа к этому складу.")
         return
 
     await callback.message.edit_text(  # type: ignore[union-attr]
@@ -51,6 +59,7 @@ async def confirm_decommission(
     callback: CallbackQuery,
     callback_data: BikeDecommissionCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Decommission the bike (set status to decommissioned)."""
     await callback.answer()
@@ -62,6 +71,10 @@ async def confirm_decommission(
 
     if bike is None:
         await callback.message.edit_text("⚠️ Байк не найден.")  # type: ignore[union-attr]
+        return
+
+    if not has_store_access(bot_user, bike.store_id):
+        await callback.answer("⛔️ У вас нет доступа к этому складу.")
         return
 
     bike.status = BikeStatus.DECOMMISSIONED

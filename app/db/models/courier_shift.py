@@ -1,5 +1,7 @@
 """Read-only model for boom_shift_couriers (existing table)."""
 
+from __future__ import annotations
+
 from datetime import datetime  # noqa: TC003
 
 from sqlalchemy import BigInteger, Boolean, DateTime, String

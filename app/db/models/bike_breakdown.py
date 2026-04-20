@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import enum
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
 

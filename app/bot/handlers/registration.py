@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from aiogram import F, Router
@@ -19,10 +20,13 @@ from sqlalchemy.sql import func as sql_func
 from app.bot.keyboards.callbacks import (
     AdminApprovalCB,
     AdminRoleSelectCB,
+    AdminSupervisorStoreActionCB,
+    AdminSupervisorStoreCB,
     RegistrationCB,
 )
 from app.bot.states.bike import RegistrationForm
 from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
+from app.core.store_access import get_accessible_stores
 from app.db.models.admin_user import AdminUser
 from app.db.models.bot_user import ROLE_LABEL, BotUser, UserRole
 
@@ -96,6 +100,48 @@ def _role_select_kb(user_id: int) -> InlineKeyboardMarkup:
             ).pack(),
         )],
     ])
+
+
+def _supervisor_store_kb(
+    user_id: int,
+    selected_store_ids: set[int],
+    stores: list,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+
+    for store in stores:
+        is_selected = store.id in selected_store_ids
+        prefix = "✅" if is_selected else "⬜️"
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{prefix} {store.display_name}",
+                callback_data=AdminSupervisorStoreCB(
+                    user_id=user_id,
+                    store_id=store.id,
+                ).pack(),
+            ),
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text=f"💾 Сохранить ({len(selected_store_ids)})",
+            callback_data=AdminSupervisorStoreActionCB(
+                user_id=user_id,
+                action="save",
+            ).pack(),
+        ),
+    ])
+    rows.append([
+        InlineKeyboardButton(
+            text="← Назад к ролям",
+            callback_data=AdminSupervisorStoreActionCB(
+                user_id=user_id,
+                action="back",
+            ).pack(),
+        ),
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _normalize_phone(phone: str) -> str:
@@ -351,6 +397,7 @@ async def admin_assign_role(
     callback_data: AdminRoleSelectCB,
     market_session: AsyncSession,
     bot: Bot,
+    state: FSMContext,
     bot_user: BotUser | None = None,
 ) -> None:
     """Admin assigns a specific role."""
@@ -366,7 +413,29 @@ async def admin_assign_role(
         )
         return
 
+    if callback_data.role == UserRole.SUPERVISOR:
+        stores = await get_accessible_stores(market_session)
+        if not stores:
+            await callback.message.edit_text(  # type: ignore[union-attr]
+                "⚠️ Нет доступных складов для привязки супервайзера.",
+            )
+            return
+
+        selected_store_ids = set(user.assigned_store_ids)
+        await state.set_state(RegistrationForm.supervisor_stores)
+        await state.update_data(
+            supervisor_user_id=user.id,
+            supervisor_store_ids=sorted(selected_store_ids),
+        )
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            f"👤 <b>{user.name}</b>\n\n"
+            "Выберите склады, к которым будет привязан супервайзер:",
+            reply_markup=_supervisor_store_kb(user.id, selected_store_ids, stores),
+        )
+        return
+
     user.role = callback_data.role
+    user.store_ids = None
     role_label = ROLE_LABEL.get(callback_data.role, callback_data.role)
 
     logger.info(
@@ -390,4 +459,145 @@ async def admin_assign_role(
     except Exception:
         logger.warning(
             "Could not notify approved user tg_id={tg_id}", tg_id=user.telegram_id,
+        )
+
+
+@router.callback_query(
+    RegistrationForm.supervisor_stores,
+    AdminSupervisorStoreCB.filter(),
+)
+async def admin_toggle_supervisor_store(
+    callback: CallbackQuery,
+    callback_data: AdminSupervisorStoreCB,
+    market_session: AsyncSession,
+    state: FSMContext,
+    bot_user: BotUser | None = None,
+) -> None:
+    """Toggle a store in supervisor assignment flow."""
+    if not is_admin_actor(bot_user, callback.from_user.id):
+        await callback.answer("⛔️ Только администратор.")
+        return
+
+    await callback.answer()
+    data = await state.get_data()
+    if data.get("supervisor_user_id") != callback_data.user_id:
+        await state.update_data(
+            supervisor_user_id=callback_data.user_id,
+            supervisor_store_ids=[],
+        )
+        data = await state.get_data()
+
+    store_ids = set(data.get("supervisor_store_ids", []))
+    if callback_data.store_id in store_ids:
+        store_ids.remove(callback_data.store_id)
+    else:
+        store_ids.add(callback_data.store_id)
+
+    await state.update_data(supervisor_store_ids=sorted(store_ids))
+    stores = await get_accessible_stores(market_session)
+    await callback.message.edit_reply_markup(  # type: ignore[union-attr]
+        reply_markup=_supervisor_store_kb(callback_data.user_id, store_ids, stores),
+    )
+
+
+@router.callback_query(
+    RegistrationForm.supervisor_stores,
+    AdminSupervisorStoreActionCB.filter(F.action == "back"),
+)
+async def admin_supervisor_store_back(
+    callback: CallbackQuery,
+    callback_data: AdminSupervisorStoreActionCB,
+    market_session: AsyncSession,
+    state: FSMContext,
+    bot_user: BotUser | None = None,
+) -> None:
+    """Return from store selection to role selection."""
+    if not is_admin_actor(bot_user, callback.from_user.id):
+        await callback.answer("⛔️ Только администратор.")
+        return
+
+    await callback.answer()
+    await state.clear()
+
+    user = await market_session.get(BotUser, callback_data.user_id)
+    if not user:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            "⚠️ Пользователь не найден.",
+        )
+        return
+
+    await callback.message.edit_text(  # type: ignore[union-attr]
+        f"👤 <b>{user.name}</b>\n\n"
+        "Выберите роль:",
+        reply_markup=_role_select_kb(user.id),
+    )
+
+
+@router.callback_query(
+    RegistrationForm.supervisor_stores,
+    AdminSupervisorStoreActionCB.filter(F.action == "save"),
+)
+async def admin_save_supervisor_role(
+    callback: CallbackQuery,
+    callback_data: AdminSupervisorStoreActionCB,
+    market_session: AsyncSession,
+    bot: Bot,
+    state: FSMContext,
+    bot_user: BotUser | None = None,
+) -> None:
+    """Persist supervisor role and selected stores."""
+    if not is_admin_actor(bot_user, callback.from_user.id):
+        await callback.answer("⛔️ Только администратор.")
+        return
+
+    data = await state.get_data()
+    store_ids = sorted(set(data.get("supervisor_store_ids", [])))
+    if not store_ids:
+        await callback.answer("Выберите хотя бы один склад.")
+        return
+
+    await callback.answer()
+    user = await market_session.get(BotUser, callback_data.user_id)
+    if not user:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            "⚠️ Пользователь не найден.",
+        )
+        await state.clear()
+        return
+
+    stores = await get_accessible_stores(market_session)
+    store_names = [
+        store.display_name for store in stores if store.id in set(store_ids)
+    ]
+
+    user.role = UserRole.SUPERVISOR
+    user.set_assigned_store_ids(store_ids)
+    await state.clear()
+
+    logger.info(
+        "Supervisor assigned: user={name} stores={stores}",
+        name=user.name,
+        stores=json.dumps(store_ids, ensure_ascii=True),
+    )
+
+    store_lines = "\n".join(f"• {name}" for name in store_names)
+    await callback.message.edit_text(  # type: ignore[union-attr]
+        f"✅ <b>{user.name}</b> → {ROLE_LABEL[UserRole.SUPERVISOR]}\n\n"
+        "Привязанные склады:\n"
+        f"{store_lines}",
+    )
+
+    try:
+        await bot.send_message(
+            user.telegram_id,
+            f"🎉 <b>Вам выдан доступ!</b>\n\n"
+            f"Роль: {ROLE_LABEL[UserRole.SUPERVISOR]}\n"
+            "Доступные склады:\n"
+            f"{store_lines}\n\n"
+            "Нажмите /start чтобы начать работу.",
+        )
+    except Exception:
+        logger.warning(
+            "Could not notify approved supervisor tg_id={tg_id}",
+            tg_id=user.telegram_id,
         )

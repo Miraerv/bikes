@@ -15,6 +15,7 @@ from app.bot.keyboards.builders import (
     bike_menu_kb,
 )
 from app.bot.keyboards.callbacks import BikeCardCB
+from app.core.store_access import has_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike
 from app.db.models.bike_breakdown import BikeBreakdown
@@ -24,6 +25,8 @@ if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from app.db.models.bot_user import BotUser
+
 router = Router(name="bike_card")
 
 
@@ -32,6 +35,7 @@ async def show_bike_card(
     callback: CallbackQuery,
     callback_data: BikeCardCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show full bike card with recent usage and breakdown stats."""
     await callback.answer()
@@ -49,6 +53,10 @@ async def show_bike_card(
             "⚠️ Байк не найден.",
             reply_markup=bike_menu_kb(),
         )
+        return
+
+    if not has_store_access(bot_user, bike.store_id):
+        await callback.answer("⛔️ У вас нет доступа к этому складу.")
         return
 
     # Status info

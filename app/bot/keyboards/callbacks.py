@@ -234,6 +234,20 @@ class AdminRoleSelectCB(CallbackData, prefix="adm_role"):
     role: str  # supervisor | mechanic
 
 
+class AdminSupervisorStoreCB(CallbackData, prefix="adm_sup_store"):
+    """Admin toggles store access for a supervisor."""
+
+    user_id: int
+    store_id: int
+
+
+class AdminSupervisorStoreActionCB(CallbackData, prefix="adm_sup_store_act"):
+    """Admin saves or cancels supervisor store selection."""
+
+    user_id: int
+    action: str  # save | back
+
+
 # ── Dashboard (Stage 6) ──────────────────────────────────────────────
 
 

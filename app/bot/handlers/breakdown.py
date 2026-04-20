@@ -34,7 +34,7 @@ from app.bot.keyboards.callbacks import (
     StoreSelectCB,
 )
 from app.bot.states.bike import BreakdownForm
-from app.core.config import settings
+from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike, BikeStatus
 from app.db.models.bike_breakdown import BikeBreakdown, BreakdownType
@@ -47,6 +47,8 @@ if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
     from aiogram.types import CallbackQuery, Message
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="breakdown")
 
@@ -87,16 +89,12 @@ async def bd_choose_store(
     callback: CallbackQuery,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 1: Choose store."""
     await callback.answer()
 
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     if not stores:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -121,8 +119,11 @@ async def bd_choose_bike(
     callback_data: StoreSelectCB,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 2: Choose bike (exclude decommissioned)."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
     store_id = callback_data.store_id
 
@@ -154,9 +155,23 @@ async def bd_choose_type(
     callback: CallbackQuery,
     callback_data: BreakdownBikeSelectCB,
     state: FSMContext,
+    market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 3: Choose breakdown type."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
+
+    bike = await market_session.get(Bike, callback_data.bike_id)
+    if bike is None or bike.store_id != callback_data.store_id:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            "⚠️ Байк не найден на выбранном складе.",
+            reply_markup=breakdown_menu_kb(),
+        )
+        await state.clear()
+        return
+
     await state.update_data(bike_id=callback_data.bike_id)
     await state.set_state(BreakdownForm.breakdown_type)
     await callback.message.edit_text(  # type: ignore[union-attr]

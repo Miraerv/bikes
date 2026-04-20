@@ -31,7 +31,7 @@ from app.bot.keyboards.callbacks import (
     UsageReturnConfirmCB,
 )
 from app.bot.states.bike import TakeBikeForm
-from app.core.config import settings
+from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
 from app.core.tz import now_display, to_yakutsk
 from app.db.models.admin_user import AdminUser
 from app.db.models.bike import Bike, BikeStatus
@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
     from aiogram.types import CallbackQuery, Message
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="usage")
 
@@ -80,16 +82,12 @@ async def take_choose_store(
     callback: CallbackQuery,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 1: Choose store."""
     await callback.answer()
 
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     if not stores:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -114,8 +112,11 @@ async def take_choose_bike(
     callback_data: StoreSelectCB,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 2: Choose bike (only online bikes at the store)."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
     store_id = callback_data.store_id
 
@@ -146,9 +147,22 @@ async def take_prompt_courier_search(
     callback: CallbackQuery,
     callback_data: UsageBikeSelectCB,
     state: FSMContext,
+    market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 3: Prompt supervisor to type courier name for search."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
+
+    bike = await market_session.get(Bike, callback_data.bike_id)
+    if bike is None or bike.store_id != callback_data.store_id:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            "⚠️ Байк не найден на выбранном складе.",
+            reply_markup=usage_menu_kb(),
+        )
+        await state.clear()
+        return
 
     await state.update_data(
         bike_id=callback_data.bike_id,
@@ -208,8 +222,11 @@ async def take_confirm(
     callback_data: UsageCourierSelectCB,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 4: Show confirmation."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
     await state.update_data(courier_id=callback_data.courier_id)
 
@@ -217,7 +234,11 @@ async def take_confirm(
     bike = await market_session.get(Bike, callback_data.bike_id)
     courier = await market_session.get(AdminUser, callback_data.courier_id)
     store_result = await market_session.execute(
-        select(Store).where(Store.id == callback_data.store_id),
+        apply_store_scope(
+            select(Store).where(Store.id == callback_data.store_id),
+            Store.id,
+            bot_user,
+        ),
     )
     store = store_result.scalar_one_or_none()
 
@@ -299,16 +320,12 @@ async def take_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 async def return_choose_store(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show stores that have active shifts."""
     await callback.answer()
 
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     if not stores:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -328,18 +345,25 @@ async def return_show_active_logs(
     callback: CallbackQuery,
     callback_data: StoreSelectCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show active shifts at the selected store."""
+    if callback_data.store_id > 0 and not await guard_store_access(
+        callback, bot_user, callback_data.store_id,
+    ):
+        return
     await callback.answer()
 
-    query = (
+    query = apply_store_scope(
         select(BikeUsageLog)
         .options(
             selectinload(BikeUsageLog.bike),
             selectinload(BikeUsageLog.courier),
         )
         .where(BikeUsageLog.ended_at.is_(None))
-        .order_by(BikeUsageLog.started_at.desc())
+        .order_by(BikeUsageLog.started_at.desc()),
+        BikeUsageLog.store_id,
+        bot_user,
     )
     if callback_data.store_id > 0:
         query = query.where(BikeUsageLog.store_id == callback_data.store_id)
@@ -365,18 +389,23 @@ async def return_confirm(
     callback: CallbackQuery,
     callback_data: UsageReturnBikeCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Ask for confirmation before ending the shift."""
     await callback.answer()
 
     result = await market_session.execute(
-        select(BikeUsageLog)
-        .options(
-            selectinload(BikeUsageLog.bike),
-            selectinload(BikeUsageLog.courier),
-            selectinload(BikeUsageLog.store),
-        )
-        .where(BikeUsageLog.id == callback_data.log_id),
+        apply_store_scope(
+            select(BikeUsageLog)
+            .options(
+                selectinload(BikeUsageLog.bike),
+                selectinload(BikeUsageLog.courier),
+                selectinload(BikeUsageLog.store),
+            )
+            .where(BikeUsageLog.id == callback_data.log_id),
+            BikeUsageLog.store_id,
+            bot_user,
+        ),
     )
     log = result.scalar_one_or_none()
 
@@ -408,17 +437,22 @@ async def return_save(
     callback: CallbackQuery,
     callback_data: UsageReturnConfirmCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """End the shift — set ended_at = now."""
     await callback.answer()
 
     result = await market_session.execute(
-        select(BikeUsageLog)
-        .options(
-            selectinload(BikeUsageLog.bike),
-            selectinload(BikeUsageLog.courier),
-        )
-        .where(BikeUsageLog.id == callback_data.log_id),
+        apply_store_scope(
+            select(BikeUsageLog)
+            .options(
+                selectinload(BikeUsageLog.bike),
+                selectinload(BikeUsageLog.courier),
+            )
+            .where(BikeUsageLog.id == callback_data.log_id),
+            BikeUsageLog.store_id,
+            bot_user,
+        ),
     )
     log = result.scalar_one_or_none()
 
@@ -470,16 +504,12 @@ async def return_cancel(callback: CallbackQuery) -> None:
 async def active_choose_store(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Choose store to see active shifts."""
     await callback.answer()
 
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -507,11 +537,16 @@ async def active_show_shifts(
     callback: CallbackQuery,
     callback_data: UsageActiveStoreCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show all active shifts at the selected store."""
+    if callback_data.store_id > 0 and not await guard_store_access(
+        callback, bot_user, callback_data.store_id,
+    ):
+        return
     await callback.answer()
 
-    query = (
+    query = apply_store_scope(
         select(BikeUsageLog)
         .options(
             selectinload(BikeUsageLog.bike),
@@ -519,7 +554,9 @@ async def active_show_shifts(
             selectinload(BikeUsageLog.store),
         )
         .where(BikeUsageLog.ended_at.is_(None))
-        .order_by(BikeUsageLog.started_at.desc())
+        .order_by(BikeUsageLog.started_at.desc()),
+        BikeUsageLog.store_id,
+        bot_user,
     )
     if callback_data.store_id > 0:
         query = query.where(BikeUsageLog.store_id == callback_data.store_id)

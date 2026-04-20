@@ -17,6 +17,7 @@ from app.bot.keyboards.builders import (
     main_menu_kb,
 )
 from app.bot.keyboards.callbacks import AnalyticsMenuCB
+from app.core.store_access import apply_store_scope
 from app.db.models.admin_user import AdminUser
 from app.db.models.bike import Bike
 from app.db.models.bike_breakdown import BikeBreakdown
@@ -27,6 +28,8 @@ from app.db.models.store import Store
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="analytics")
 
@@ -71,33 +74,40 @@ async def analytics_back_to_main(callback: CallbackQuery) -> None:
 async def report_breakdowns_month(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Report: breakdowns in the last month — total, by store, by type."""
     await callback.answer()
     since = _period_start()
 
     # Total count
-    total_q = select(func.count(BikeBreakdown.id)).where(
-        BikeBreakdown.reported_at >= since,
+    total_q = apply_store_scope(
+        select(func.count(BikeBreakdown.id)).where(BikeBreakdown.reported_at >= since),
+        BikeBreakdown.store_id,
+        bot_user,
     )
     total = (await market_session.execute(total_q)).scalar() or 0
 
     # By store
-    store_q = (
+    store_q = apply_store_scope(
         select(Store.street, Store.title, func.count(BikeBreakdown.id))
         .join(BikeBreakdown, BikeBreakdown.store_id == Store.id)
         .where(BikeBreakdown.reported_at >= since)
         .group_by(Store.id)
-        .order_by(func.count(BikeBreakdown.id).desc())
+        .order_by(func.count(BikeBreakdown.id).desc()),
+        BikeBreakdown.store_id,
+        bot_user,
     )
     store_rows = (await market_session.execute(store_q)).all()
 
     # By type
-    type_q = (
+    type_q = apply_store_scope(
         select(BikeBreakdown.breakdown_type, func.count(BikeBreakdown.id))
         .where(BikeBreakdown.reported_at >= since)
         .group_by(BikeBreakdown.breakdown_type)
-        .order_by(func.count(BikeBreakdown.id).desc())
+        .order_by(func.count(BikeBreakdown.id).desc()),
+        BikeBreakdown.store_id,
+        bot_user,
     )
     type_rows = (await market_session.execute(type_q)).all()
 
@@ -137,12 +147,13 @@ async def report_breakdowns_month(
 async def report_breakdowns_couriers(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Report: breakdown count per courier (who breaks bikes the most)."""
     await callback.answer()
     since = _period_start()
 
-    q = (
+    q = apply_store_scope(
         select(
             AdminUser.name,
             AdminUser.surname,
@@ -152,7 +163,9 @@ async def report_breakdowns_couriers(
         .where(BikeBreakdown.reported_at >= since)
         .group_by(AdminUser.id)
         .order_by(func.count(BikeBreakdown.id).desc())
-        .limit(10)
+        .limit(10),
+        BikeBreakdown.store_id,
+        bot_user,
     )
     rows = (await market_session.execute(q)).all()
 
@@ -179,12 +192,13 @@ async def report_breakdowns_couriers(
 async def report_unreliable_bikes(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Report: top-10 bikes by breakdown count."""
     await callback.answer()
     since = _period_start()
 
-    q = (
+    q = apply_store_scope(
         select(
             Bike.bike_number,
             Bike.model,
@@ -194,7 +208,9 @@ async def report_unreliable_bikes(
         .where(BikeBreakdown.reported_at >= since)
         .group_by(Bike.id)
         .order_by(func.count(BikeBreakdown.id).desc())
-        .limit(10)
+        .limit(10),
+        BikeBreakdown.store_id,
+        bot_user,
     )
     rows = (await market_session.execute(q)).all()
 
@@ -220,12 +236,13 @@ async def report_unreliable_bikes(
 async def report_bike_repairs(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Report: top-10 bikes by repair count, with total duration & cost."""
     await callback.answer()
     since = _period_start()
 
-    q = (
+    q = apply_store_scope(
         select(
             Bike.bike_number,
             Bike.model,
@@ -237,7 +254,9 @@ async def report_bike_repairs(
         .where(BikeRepair.picked_up_at >= since)
         .group_by(Bike.id)
         .order_by(func.count(BikeRepair.id).desc())
-        .limit(10)
+        .limit(10),
+        BikeRepair.store_id,
+        bot_user,
     )
     rows = (await market_session.execute(q)).all()
 
@@ -269,16 +288,19 @@ async def report_bike_repairs(
 async def report_downtime(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Report: downtime % — repair hours / total hours since commissioned."""
     await callback.answer()
     now = datetime.now()
 
     # Fetch bikes with their repairs
-    q = (
+    q = apply_store_scope(
         select(Bike)
         .options(joinedload(Bike.repairs))
-        .where(Bike.status != "decommissioned")
+        .where(Bike.status != "decommissioned"),
+        Bike.store_id,
+        bot_user,
     )
     result = await market_session.execute(q)
     bikes = result.unique().scalars().all()
@@ -337,23 +359,25 @@ def _progress_bar(pct: float, length: int = 10) -> str:
 async def report_careful_couriers(
     callback: CallbackQuery,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Report: couriers ranked by fewest breakdowns (who is the most careful)."""
     await callback.answer()
     since = _period_start()
 
     # All couriers who had shifts in the period
-    breakdown_count = (
+    breakdown_count = apply_store_scope(
         select(
             BikeBreakdown.courier_id,
             func.count(BikeBreakdown.id).label("bd_count"),
         )
         .where(BikeBreakdown.reported_at >= since)
-        .group_by(BikeBreakdown.courier_id)
-        .subquery()
-    )
+        .group_by(BikeBreakdown.courier_id),
+        BikeBreakdown.store_id,
+        bot_user,
+    ).subquery()
 
-    q = (
+    q = apply_store_scope(
         select(
             AdminUser.name,
             AdminUser.surname,
@@ -365,7 +389,9 @@ async def report_careful_couriers(
         .where(BikeUsageLog.started_at >= since)
         .group_by(AdminUser.id, breakdown_count.c.bd_count)
         .order_by(func.coalesce(breakdown_count.c.bd_count, 0).asc())
-        .limit(10)
+        .limit(10),
+        BikeUsageLog.store_id,
+        bot_user,
     )
     rows = (await market_session.execute(q)).all()
 

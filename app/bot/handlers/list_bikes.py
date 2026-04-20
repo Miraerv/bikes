@@ -15,13 +15,14 @@ from app.bot.keyboards.builders import (
     store_select_kb,
 )
 from app.bot.keyboards.callbacks import BikeListCB, BikeMenuCB, StatusFilterCB, StoreSelectCB
-from app.core.config import settings
+from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
 from app.db.models.bike import Bike, BikeStatus
-from app.db.models.store import Store
 
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="list_bikes")
 
@@ -30,16 +31,15 @@ router = Router(name="list_bikes")
 
 
 @router.callback_query(BikeMenuCB.filter(F.action == "list"))
-async def choose_store(callback: CallbackQuery, market_session: AsyncSession) -> None:
+async def choose_store(
+    callback: CallbackQuery,
+    market_session: AsyncSession,
+    bot_user: BotUser | None = None,
+) -> None:
     """Show store selector for filtering bikes."""
     await callback.answer()
 
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "📋 <b>Список байков</b>\n\nВыберите склад:",
@@ -51,8 +51,16 @@ async def choose_store(callback: CallbackQuery, market_session: AsyncSession) ->
 
 
 @router.callback_query(StoreSelectCB.filter(F.purpose == "filter"))
-async def choose_status(callback: CallbackQuery, callback_data: StoreSelectCB) -> None:
+async def choose_status(
+    callback: CallbackQuery,
+    callback_data: StoreSelectCB,
+    bot_user: BotUser | None = None,
+) -> None:
     """Show status filter after store is selected."""
+    if callback_data.store_id > 0 and not await guard_store_access(
+        callback, bot_user, callback_data.store_id,
+    ):
+        return
     await callback.answer()
     await callback.message.edit_text(  # type: ignore[union-attr]
         "📊 <b>Фильтр по статусу</b>\n\nВыберите статус:",
@@ -68,11 +76,16 @@ async def show_filtered_list(
     callback: CallbackQuery,
     callback_data: StatusFilterCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Load bikes with filters and show paginated list (page 0)."""
+    if callback_data.store_id > 0 and not await guard_store_access(
+        callback, bot_user, callback_data.store_id,
+    ):
+        return
     await callback.answer()
     await _show_bike_list(
-        callback, callback_data.store_id, callback_data.status, 0, market_session,
+        callback, callback_data.store_id, callback_data.status, 0, market_session, bot_user,
     )
 
 
@@ -81,11 +94,21 @@ async def paginate_list(
     callback: CallbackQuery,
     callback_data: BikeListCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Handle page navigation."""
+    if callback_data.store_id > 0 and not await guard_store_access(
+        callback, bot_user, callback_data.store_id,
+    ):
+        return
     await callback.answer()
     await _show_bike_list(
-        callback, callback_data.store_id, callback_data.status, callback_data.page, market_session,
+        callback,
+        callback_data.store_id,
+        callback_data.status,
+        callback_data.page,
+        market_session,
+        bot_user,
     )
 
 
@@ -98,11 +121,12 @@ async def _show_bike_list(
     status: str,
     page: int,
     session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Query bikes and render paginated inline keyboard."""
     # Build base query
-    query = select(Bike)
-    count_query = select(func.count(Bike.id))
+    query = apply_store_scope(select(Bike), Bike.store_id, bot_user)
+    count_query = apply_store_scope(select(func.count(Bike.id)), Bike.store_id, bot_user)
 
     if store_id > 0:
         query = query.where(Bike.store_id == store_id)

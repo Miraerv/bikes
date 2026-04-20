@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import json
+from contextlib import suppress
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
 from enum import StrEnum
 
@@ -44,6 +48,7 @@ class BotUser(MarketBase):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    store_ids: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False,
@@ -82,6 +87,24 @@ class BotUser(MarketBase):
     @property
     def role_label(self) -> str:
         return ROLE_LABEL.get(self.role, self.role)
+
+    @property
+    def assigned_store_ids(self) -> list[int]:
+        """Return assigned store ids for supervisors, empty when not configured."""
+        if not self.store_ids:
+            return []
+
+        with suppress(ValueError, TypeError, json.JSONDecodeError):
+            raw_ids = json.loads(self.store_ids)
+            if isinstance(raw_ids, list):
+                return [int(store_id) for store_id in raw_ids]
+
+        return []
+
+    def set_assigned_store_ids(self, store_ids: list[int]) -> None:
+        """Persist sorted unique store ids as JSON."""
+        normalized = sorted(set(store_ids))
+        self.store_ids = json.dumps(normalized, ensure_ascii=True)
 
     def __repr__(self) -> str:
         return (

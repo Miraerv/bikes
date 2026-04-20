@@ -37,7 +37,7 @@ from app.bot.keyboards.callbacks import (
     StoreSelectCB,
 )
 from app.bot.states.bike import RepairCompleteForm, RepairPickupForm
-from app.core.config import settings
+from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike, BikeStatus
 from app.db.models.bike_breakdown import BikeBreakdown
@@ -104,16 +104,12 @@ async def rp_choose_store(
     callback: CallbackQuery,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 1: Choose store."""
     await callback.answer()
 
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     if not stores:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -138,8 +134,11 @@ async def rp_choose_bike(
     callback_data: StoreSelectCB,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Step 2: Choose bike (inspection / repair status only)."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
     store_id = callback_data.store_id
 
@@ -182,8 +181,20 @@ async def rp_choose_breakdown(
     bot_user: BotUser | None = None,
 ) -> None:
     """Step 3: Link to an existing breakdown (optional)."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
     bike_id = callback_data.bike_id
+
+    bike = await market_session.get(Bike, bike_id)
+    if bike is None or bike.store_id != callback_data.store_id:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            "⚠️ Байк не найден на выбранном складе.",
+            reply_markup=repair_menu_kb(),
+        )
+        await state.clear()
+        return
+
     await state.update_data(bike_id=bike_id)
 
     # Find open breakdowns for this bike
@@ -430,15 +441,20 @@ async def rp_complete_start(
     callback: CallbackQuery,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Show list of active (in-progress) repairs."""
     await callback.answer()
 
     result = await market_session.execute(
-        select(BikeRepair)
-        .options(selectinload(BikeRepair.bike))
-        .where(BikeRepair.completed_at.is_(None))
-        .order_by(BikeRepair.picked_up_at.desc()),
+        apply_store_scope(
+            select(BikeRepair)
+            .options(selectinload(BikeRepair.bike))
+            .where(BikeRepair.completed_at.is_(None))
+            .order_by(BikeRepair.picked_up_at.desc()),
+            BikeRepair.store_id,
+            bot_user,
+        ),
     )
     repairs = list(result.scalars().all())
 
@@ -462,12 +478,20 @@ async def rp_complete_select(
     callback_data: RepairSelectCB,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Select a repair — enter work description."""
     await callback.answer()
     repair_id = callback_data.repair_id
 
-    repair = await market_session.get(BikeRepair, repair_id)
+    result = await market_session.execute(
+        apply_store_scope(
+            select(BikeRepair).where(BikeRepair.id == repair_id),
+            BikeRepair.store_id,
+            bot_user,
+        ),
+    )
+    repair = result.scalar_one_or_none()
     if not repair:
         await callback.message.edit_text(  # type: ignore[union-attr]
             "⚠️ Ремонт не найден.",
@@ -534,6 +558,7 @@ async def rp_complete_cost(
     message: Message,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Receive cost, show confirmation."""
     text = message.text.strip() if message.text else ""
@@ -551,18 +576,26 @@ async def rp_complete_cost(
             return
 
     await state.update_data(cost=str(cost) if cost is not None else None)
-    await _show_complete_confirm(message, state, market_session)
+    await _show_complete_confirm(message, state, market_session, bot_user)
 
 
 async def _show_complete_confirm(
     event: Message | CallbackQuery,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Build and show the repair completion confirmation screen."""
     data = await state.get_data()
 
-    repair = await market_session.get(BikeRepair, data["repair_id"])
+    result = await market_session.execute(
+        apply_store_scope(
+            select(BikeRepair).where(BikeRepair.id == data["repair_id"]),
+            BikeRepair.store_id,
+            bot_user,
+        ),
+    )
+    repair = result.scalar_one_or_none()
     bike = repair.bike if repair else None
 
     bike_label = f"{bike.bike_number} — {bike.model}" if bike else "—"
@@ -606,6 +639,7 @@ async def rp_complete_save(
     callback: CallbackQuery,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Save the repair completion."""
     await callback.answer()
@@ -613,7 +647,14 @@ async def rp_complete_save(
 
     now = datetime.now()
 
-    repair = await market_session.get(BikeRepair, data["repair_id"])
+    result = await market_session.execute(
+        apply_store_scope(
+            select(BikeRepair).where(BikeRepair.id == data["repair_id"]),
+            BikeRepair.store_id,
+            bot_user,
+        ),
+    )
+    repair = result.scalar_one_or_none()
     if not repair:
         await callback.message.edit_text(  # type: ignore[union-attr]
             "⚠️ Ремонт не найден.",

@@ -13,9 +13,23 @@ from app.db.models.bot_user import BotUser, UserRole
 class _FakeState:
     def __init__(self) -> None:
         self.cleared = False
+        self.current_state: object | None = None
+        self.data: dict[str, object] = {}
 
     async def clear(self) -> None:
         self.cleared = True
+        self.current_state = None
+        self.data = {}
+
+    async def set_state(self, state: object) -> None:
+        self.current_state = state
+
+    async def update_data(self, **kwargs: object) -> dict[str, object]:
+        self.data.update(kwargs)
+        return self.data
+
+    async def get_data(self) -> dict[str, object]:
+        return self.data
 
 
 class _FakeExecuteResult:
@@ -138,6 +152,7 @@ async def test_admin_assign_role_blocks_non_admin() -> None:
         user=BotUser(id=55, telegram_id=999, name="Pending User", role=UserRole.PENDING),
     )
     bot = _FakeBot()
+    state = _FakeState()
     supervisor = BotUser(telegram_id=800, name="Supervisor", role=UserRole.SUPERVISOR)
 
     await registration.admin_assign_role(
@@ -145,12 +160,51 @@ async def test_admin_assign_role_blocks_non_admin() -> None:
         AdminRoleSelectCB(user_id=55, role="courier"),
         market_session,
         bot,
+        state,
         bot_user=supervisor,
     )
 
     assert callback.answers == ["⛔️ Только администратор."]
     assert callback.message.edits == []
     assert bot.calls == []
+
+
+@pytest.mark.asyncio
+async def test_admin_save_supervisor_role_persists_store_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    callback = _FakeCallback(telegram_id=700)
+    user = BotUser(id=55, telegram_id=999, name="Pending User", role=UserRole.PENDING)
+    market_session = _FakeSession(user=user)
+    bot = _FakeBot()
+    state = _FakeState()
+    admin = BotUser(telegram_id=700, name="DB Admin", role=UserRole.ADMIN)
+
+    await state.set_state(registration.RegistrationForm.supervisor_stores)
+    await state.update_data(supervisor_user_id=55, supervisor_store_ids=[10, 20])
+
+    async def fake_get_accessible_stores(_session: object) -> list[object]:
+        return [
+            SimpleNamespace(id=10, display_name="Store 10"),
+            SimpleNamespace(id=20, display_name="Store 20"),
+        ]
+
+    monkeypatch.setattr(registration, "get_accessible_stores", fake_get_accessible_stores)
+
+    await registration.admin_save_supervisor_role(
+        callback,
+        registration.AdminSupervisorStoreActionCB(user_id=55, action="save"),
+        market_session,
+        bot,
+        state,
+        bot_user=admin,
+    )
+
+    assert user.role == UserRole.SUPERVISOR
+    assert user.assigned_store_ids == [10, 20]
+    assert state.cleared is True
+    assert bot.calls == [999]
+    assert "Привязанные склады" in callback.message.edits[0][0]
 
 
 @pytest.mark.asyncio

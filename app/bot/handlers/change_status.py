@@ -15,11 +15,14 @@ from app.bot.keyboards.builders import (
     bike_status_select_kb,
 )
 from app.bot.keyboards.callbacks import BikeStatusCB
+from app.core.store_access import has_store_access
 from app.db.models.bike import Bike, BikeStatus
 
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="change_status")
 
@@ -42,6 +45,7 @@ async def set_bike_status(
     callback: CallbackQuery,
     callback_data: BikeStatusCB,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Update bike status in the database."""
     await callback.answer()
@@ -53,6 +57,10 @@ async def set_bike_status(
 
     if bike is None:
         await callback.message.edit_text("⚠️ Байк не найден.")  # type: ignore[union-attr]
+        return
+
+    if not has_store_access(bot_user, bike.store_id):
+        await callback.answer("⛔️ У вас нет доступа к этому складу.")
         return
 
     new_status = BikeStatus(callback_data.status)

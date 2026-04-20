@@ -19,7 +19,7 @@ from app.bot.keyboards.builders import (
 )
 from app.bot.keyboards.callbacks import AddBikeConfirmCB, BikeMenuCB, StoreSelectCB
 from app.bot.states.bike import AddBikeForm
-from app.core.config import settings
+from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import now_display
 from app.db.models.bike import Bike
 from app.db.models.store import Store
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
     from aiogram.types import CallbackQuery, Message
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bot_user import BotUser
 
 router = Router(name="add_bike")
 
@@ -106,18 +108,13 @@ async def process_model(
     message: Message,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Save model, show store selection."""
     model_name = message.text.strip()  # type: ignore[union-attr]
     await state.update_data(model=model_name)
 
-    # Load stores from market DB
-    result = await market_session.execute(
-        select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
-    )
-    stores = list(result.scalars().all())
+    stores = await get_accessible_stores(market_session, bot_user)
 
     if not stores:
         await message.answer("⚠️ Нет доступных складов. Обратитесь к администратору.")
@@ -141,8 +138,11 @@ async def process_store(
     callback_data: StoreSelectCB,
     state: FSMContext,
     market_session: AsyncSession,
+    bot_user: BotUser | None = None,
 ) -> None:
     """Save store, ask for commissioning date."""
+    if not await guard_store_access(callback, bot_user, callback_data.store_id):
+        return
     await callback.answer()
 
     store_id = callback_data.store_id

@@ -1,5 +1,7 @@
 """Model for boom_shift_couriers_bike table."""
 
+from __future__ import annotations
+
 from datetime import datetime  # noqa: TC003
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
