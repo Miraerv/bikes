@@ -231,7 +231,7 @@ class AdminRoleSelectCB(CallbackData, prefix="adm_role"):
     """Admin assigns a role to the user."""
 
     user_id: int
-    role: str  # supervisor | mechanic
+    role: str  # admin | supervisor | mechanic | courier
 
 
 class AdminSupervisorStoreCB(CallbackData, prefix="adm_sup_store"):

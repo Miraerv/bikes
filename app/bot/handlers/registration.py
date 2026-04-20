@@ -83,6 +83,12 @@ def _approval_kb(user_id: int) -> InlineKeyboardMarkup:
 def _role_select_kb(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
+            text="👑 Админ",
+            callback_data=AdminRoleSelectCB(
+                user_id=user_id, role="admin",
+            ).pack(),
+        )],
+        [InlineKeyboardButton(
             text="📋 Супервайзер",
             callback_data=AdminRoleSelectCB(
                 user_id=user_id, role="supervisor",

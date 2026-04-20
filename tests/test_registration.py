@@ -240,6 +240,36 @@ async def test_admin_assign_role_notifies_other_admins(
 
 
 @pytest.mark.asyncio
+async def test_admin_can_assign_admin_role() -> None:
+    callback = _FakeCallback(telegram_id=700)
+    user = BotUser(id=55, telegram_id=999, name="Pending User", role=UserRole.PENDING)
+    market_session = _FakeSession(user=user)
+    market_session.notifications = [
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=700, message_id=1001),
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=701, message_id=1002),
+    ]
+    bot = _FakeBot()
+    state = _FakeState()
+    admin = BotUser(telegram_id=700, name="DB Admin", role=UserRole.ADMIN)
+
+    await registration.admin_assign_role(
+        callback,
+        AdminRoleSelectCB(user_id=55, role="admin"),
+        market_session,
+        bot,
+        state,
+        bot_user=admin,
+    )
+
+    assert user.role == UserRole.ADMIN
+    assert "👑 Админ" in callback.message.edits[0][0]
+    assert bot.calls == [999]
+    assert bot.edits == [
+        (701, 1002, "✅ <b>Pending User</b> уже одобрен.\n\nРоль: 👑 Админ"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_admin_save_supervisor_role_persists_store_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
