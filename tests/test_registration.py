@@ -7,6 +7,7 @@ import pytest
 from app.bot.handlers import registration
 from app.bot.keyboards.callbacks import AdminApprovalCB, AdminRoleSelectCB
 from app.db.models.admin_user import AdminUser
+from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 from app.db.models.bot_user import BotUser, UserRole
 
 
@@ -39,23 +40,45 @@ class _FakeExecuteResult:
     def scalar_one_or_none(self) -> object:
         return self._value
 
+    def scalars(self) -> "_FakeScalarsResult":
+        values = self._value if isinstance(self._value, list) else []
+        return _FakeScalarsResult(values)
+
+
+class _FakeScalarsResult:
+    def __init__(self, values: list[object]) -> None:
+        self._values = values
+
+    def all(self) -> list[object]:
+        return self._values
+
 
 class _FakeSession:
     def __init__(self, admin_user: AdminUser | None = None, user: BotUser | None = None) -> None:
         self.admin_user = admin_user
         self.user = user
         self.deleted: list[BotUser] = []
-        self.added: list[BotUser] = []
+        self.added: list[object] = []
+        self.notifications: list[BotUserAdminNotification] = []
 
-    async def execute(self, _query: object) -> _FakeExecuteResult:
-        return _FakeExecuteResult(self.admin_user)
+    async def execute(self, query: object) -> _FakeExecuteResult:
+        entity = getattr(query, "column_descriptions", [{}])[0].get("entity")
+        if entity is AdminUser:
+            return _FakeExecuteResult(self.admin_user)
+        if entity is BotUserAdminNotification:
+            return _FakeExecuteResult(self.notifications)
+        return _FakeExecuteResult(None)
 
-    def add(self, user: BotUser) -> None:
-        self.added.append(user)
+    def add(self, instance: object) -> None:
+        self.added.append(instance)
+        if isinstance(instance, BotUserAdminNotification):
+            self.notifications.append(instance)
 
     async def flush(self) -> None:
         if self.added:
-            self.added[-1].id = 321
+            for instance in self.added:
+                if isinstance(instance, BotUser) and instance.id is None:
+                    instance.id = 321
 
     async def get(self, _model: object, _user_id: int) -> BotUser | None:
         return self.user
@@ -79,14 +102,29 @@ class _FakeMessage:
 class _FakeBot:
     def __init__(self) -> None:
         self.calls: list[int] = []
+        self.messages: list[tuple[int, str, object | None]] = []
+        self.edits: list[tuple[int, int, str]] = []
+        self._message_id = 1000
 
     async def send_message(
         self,
         chat_id: int,
         text: str,
         reply_markup: object | None = None,
-    ) -> None:
+    ) -> SimpleNamespace:
         self.calls.append(chat_id)
+        self.messages.append((chat_id, text, reply_markup))
+        self._message_id += 1
+        return SimpleNamespace(message_id=self._message_id)
+
+    async def edit_message_text(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+        text: str,
+    ) -> None:
+        self.edits.append((chat_id, message_id, text))
 
 
 class _FakeCallback:
@@ -170,12 +208,48 @@ async def test_admin_assign_role_blocks_non_admin() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_assign_role_notifies_other_admins(
+) -> None:
+    callback = _FakeCallback(telegram_id=700)
+    user = BotUser(id=55, telegram_id=999, name="Pending User", role=UserRole.PENDING)
+    market_session = _FakeSession(user=user)
+    market_session.notifications = [
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=700, message_id=1001),
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=701, message_id=1002),
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=702, message_id=1003),
+    ]
+    bot = _FakeBot()
+    state = _FakeState()
+    admin = BotUser(telegram_id=700, name="DB Admin", role=UserRole.ADMIN)
+
+    await registration.admin_assign_role(
+        callback,
+        AdminRoleSelectCB(user_id=55, role="courier"),
+        market_session,
+        bot,
+        state,
+        bot_user=admin,
+    )
+
+    assert user.role == UserRole.COURIER
+    assert bot.calls == [999]
+    assert bot.edits == [
+        (701, 1002, "✅ <b>Pending User</b> уже одобрен.\n\nРоль: 🚚 Курьер"),
+        (702, 1003, "✅ <b>Pending User</b> уже одобрен.\n\nРоль: 🚚 Курьер"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_admin_save_supervisor_role_persists_store_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     callback = _FakeCallback(telegram_id=700)
     user = BotUser(id=55, telegram_id=999, name="Pending User", role=UserRole.PENDING)
     market_session = _FakeSession(user=user)
+    market_session.notifications = [
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=700, message_id=1001),
+        BotUserAdminNotification(bot_user_id=55, admin_telegram_id=701, message_id=1002),
+    ]
     bot = _FakeBot()
     state = _FakeState()
     admin = BotUser(telegram_id=700, name="DB Admin", role=UserRole.ADMIN)
@@ -204,7 +278,29 @@ async def test_admin_save_supervisor_role_persists_store_ids(
     assert user.assigned_store_ids == [10, 20]
     assert state.cleared is True
     assert bot.calls == [999]
+    assert bot.edits == [
+        (701, 1002, "✅ <b>Pending User</b> уже одобрен.\n\nРоль: 📋 Супервайзер\nПривязанные склады:\n• Store 10\n• Store 20"),
+    ]
     assert "Привязанные склады" in callback.message.edits[0][0]
+
+
+@pytest.mark.asyncio
+async def test_admin_approve_shows_already_approved_status() -> None:
+    callback = _FakeCallback(telegram_id=700)
+    market_session = _FakeSession(
+        user=BotUser(id=55, telegram_id=999, name="Pending User", role=UserRole.COURIER),
+    )
+    bot_user = BotUser(telegram_id=700, name="DB Admin", role=UserRole.ADMIN)
+
+    await registration.admin_approve(
+        callback,
+        AdminApprovalCB(user_id=55, action="approve"),
+        market_session,
+        bot_user=bot_user,
+    )
+
+    assert callback.answers == [None]
+    assert "уже одобрен" in callback.message.edits[0][0]
 
 
 @pytest.mark.asyncio
@@ -236,5 +332,14 @@ async def test_reg_contact_notifies_all_admins(
     )
 
     assert state.cleared is True
-    assert [user.role for user in market_session.added] == [UserRole.PENDING]
+    added_users = [item for item in market_session.added if isinstance(item, BotUser)]
+    added_notifications = [
+        item for item in market_session.added if isinstance(item, BotUserAdminNotification)
+    ]
+    assert [user.role for user in added_users] == [UserRole.PENDING]
     assert bot.calls == [101, 202, 303]
+    assert [(item.admin_telegram_id, item.message_id) for item in added_notifications] == [
+        (101, 1001),
+        (202, 1002),
+        (303, 1003),
+    ]

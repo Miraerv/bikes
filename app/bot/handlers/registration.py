@@ -28,6 +28,7 @@ from app.bot.states.bike import RegistrationForm
 from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
 from app.core.store_access import get_accessible_stores
 from app.db.models.admin_user import AdminUser
+from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 from app.db.models.bot_user import ROLE_LABEL, BotUser, UserRole
 
 if TYPE_CHECKING:
@@ -147,6 +148,37 @@ def _supervisor_store_kb(
 def _normalize_phone(phone: str) -> str:
     """Strip everything except digits from a phone number."""
     return "".join(c for c in phone if c.isdigit())
+
+
+async def _notify_other_admins(
+    bot: Bot,
+    market_session: AsyncSession,
+    user_id: int,
+    actor_tg_id: int,
+    text: str,
+) -> None:
+    """Edit the original admin notifications except for the acting admin."""
+    result = await market_session.execute(
+        select(BotUserAdminNotification).where(
+            BotUserAdminNotification.bot_user_id == user_id,
+        ),
+    )
+    notifications = result.scalars().all()
+    for notification in notifications:
+        if notification.admin_telegram_id == actor_tg_id:
+            continue
+        try:
+            await bot.edit_message_text(
+                chat_id=notification.admin_telegram_id,
+                message_id=notification.message_id,
+                text=text,
+            )
+        except Exception:
+            logger.warning(
+                "Could not update admin notification tg_id={tg_id} message_id={message_id}",
+                tg_id=notification.admin_telegram_id,
+                message_id=notification.message_id,
+            )
 
 
 # ── Registration flow ──────────────────────────────────────────────────
@@ -296,11 +328,16 @@ async def reg_contact(
     )
     for tg_admin_id in await get_admin_telegram_ids(market_session):
         try:
-            await bot.send_message(
+            sent = await bot.send_message(
                 tg_admin_id,
                 admin_message,
                 reply_markup=_approval_kb(bot_user.id),
             )
+            market_session.add(BotUserAdminNotification(
+                bot_user_id=bot_user.id,
+                admin_telegram_id=tg_admin_id,
+                message_id=sent.message_id,
+            ))
         except Exception:
             logger.warning(
                 "Could not notify admin tg_id={tg_id} about registration",
@@ -343,6 +380,13 @@ async def admin_approve(
         )
         return
 
+    if not user.is_pending:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{user.name}</b> уже одобрен.\n\n"
+            f"Роль: {user.role_label}",
+        )
+        return
+
     await callback.message.edit_text(  # type: ignore[union-attr]
         f"👤 <b>{user.name}</b>\n\n"
         "Выберите роль:",
@@ -376,6 +420,14 @@ async def admin_reject(
     logger.info("Registration rejected: user={name}", name=user.name)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
+        f"❌ Заявка <b>{user.name}</b> отклонена.",
+    )
+
+    await _notify_other_admins(
+        bot,
+        market_session,
+        user.id,
+        callback.from_user.id,
         f"❌ Заявка <b>{user.name}</b> отклонена.",
     )
 
@@ -413,6 +465,13 @@ async def admin_assign_role(
         )
         return
 
+    if not user.is_pending:
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            f"✅ <b>{user.name}</b> уже одобрен.\n\n"
+            f"Роль: {user.role_label}",
+        )
+        return
+
     if callback_data.role == UserRole.SUPERVISOR:
         stores = await get_accessible_stores(market_session)
         if not stores:
@@ -447,6 +506,15 @@ async def admin_assign_role(
     await callback.message.edit_text(  # type: ignore[union-attr]
         f"✅ <b>{user.name}</b> → {role_label}\n\n"
         "Роль успешно назначена.",
+    )
+
+    await _notify_other_admins(
+        bot,
+        market_session,
+        user.id,
+        callback.from_user.id,
+        f"✅ <b>{user.name}</b> уже одобрен.\n\n"
+        f"Роль: {role_label}",
     )
 
     try:
@@ -583,6 +651,17 @@ async def admin_save_supervisor_role(
     store_lines = "\n".join(f"• {name}" for name in store_names)
     await callback.message.edit_text(  # type: ignore[union-attr]
         f"✅ <b>{user.name}</b> → {ROLE_LABEL[UserRole.SUPERVISOR]}\n\n"
+        "Привязанные склады:\n"
+        f"{store_lines}",
+    )
+
+    await _notify_other_admins(
+        bot,
+        market_session,
+        user.id,
+        callback.from_user.id,
+        f"✅ <b>{user.name}</b> уже одобрен.\n\n"
+        f"Роль: {ROLE_LABEL[UserRole.SUPERVISOR]}\n"
         "Привязанные склады:\n"
         f"{store_lines}",
     )
