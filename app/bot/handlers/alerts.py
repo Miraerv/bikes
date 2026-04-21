@@ -139,6 +139,23 @@ def _shift_covers_store_at_control_time(
     return store_id in parse_store_id_set(shift.store_ids)
 
 
+def _store_has_online_courier(
+    store: Store,
+    shifts: list[CourierShift],
+    *,
+    control_ts: datetime,
+) -> bool:
+    """Return True when any online courier shift covers the store."""
+    return any(
+        _shift_covers_store_at_control_time(
+            shift,
+            store_id=store.id,
+            control_ts=control_ts,
+        )
+        for shift in shifts
+    )
+
+
 def _find_stores_without_online_courier(
     stores: list[Store],
     shifts: list[CourierShift],
@@ -148,14 +165,7 @@ def _find_stores_without_online_courier(
     """Return stores that have no online courier shift at the control timestamp."""
     incident_stores: list[Store] = []
     for store in stores:
-        if any(
-            _shift_covers_store_at_control_time(
-                shift,
-                store_id=store.id,
-                control_ts=control_ts,
-            )
-            for shift in shifts
-        ):
+        if _store_has_online_courier(store, shifts, control_ts=control_ts):
             continue
         incident_stores.append(store)
     return incident_stores
