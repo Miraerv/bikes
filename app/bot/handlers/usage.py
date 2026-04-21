@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from aiogram import F, Router
 from loguru import logger
-from sqlalchemy import or_, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 
 from app.bot.keyboards.builders import (
     main_menu_kb,
     store_select_kb,
     usage_active_logs_kb,
+    usage_active_store_select_kb,
     usage_bike_select_kb,
     usage_confirm_take_kb,
     usage_courier_select_kb,
@@ -31,12 +30,20 @@ from app.bot.keyboards.callbacks import (
     UsageReturnConfirmCB,
 )
 from app.bot.states.bike import TakeBikeForm
-from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
+from app.core.admin_user_lookup import search_admin_users_by_name
+from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import now_display, to_yakutsk
-from app.db.models.admin_user import AdminUser
+from app.core.usage_flow import (
+    TakeBikeDraft,
+    build_take_bike_confirmation,
+    create_usage_log,
+    finish_usage_log,
+    format_active_shift_lines,
+    get_active_usage_log,
+    list_active_usage_logs,
+    usage_shift_summary,
+)
 from app.db.models.bike import Bike, BikeStatus
-from app.db.models.bike_usage_log import BikeUsageLog
-from app.db.models.store import Store
 
 if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
@@ -189,19 +196,7 @@ async def take_courier_search(
     query_text = message.text.strip()
     data = await state.get_data()
 
-    pattern = f"%{query_text}%"
-    result = await market_session.execute(
-        select(AdminUser)
-        .where(
-            or_(
-                AdminUser.name.ilike(pattern),
-                AdminUser.surname.ilike(pattern),
-            ),
-        )
-        .order_by(AdminUser.name)
-        .limit(20),
-    )
-    couriers = list(result.scalars().all())
+    couriers = await search_admin_users_by_name(market_session, query_text, limit=20)
 
     if not couriers:
         await message.answer(
@@ -232,36 +227,29 @@ async def take_confirm(
     if not await guard_store_access(callback, bot_user, callback_data.store_id):
         return
     await callback.answer()
-    await state.update_data(courier_id=callback_data.courier_id)
 
-    # Fetch names for display
-    bike = await market_session.get(Bike, callback_data.bike_id)
-    courier = await market_session.get(AdminUser, callback_data.courier_id)
-    store_result = await market_session.execute(
-        apply_store_scope(
-            select(Store).where(Store.id == callback_data.store_id),
-            Store.id,
-            bot_user,
-        ),
+    draft = TakeBikeDraft(
+        bike_id=callback_data.bike_id,
+        courier_id=callback_data.courier_id,
+        store_id=callback_data.store_id,
     )
-    store = store_result.scalar_one_or_none()
-
-    bike_label = f"{bike.bike_number} — {bike.model}" if bike else "—"
-    courier_label = courier.display_name if courier else "—"
-    store_label = store.display_name if store else "—"
+    confirmation = await build_take_bike_confirmation(market_session, draft, bot_user)
 
     await state.update_data(
-        bike_label=bike_label,
-        courier_label=courier_label,
-        store_label=store_label,
+        bike_id=draft.bike_id,
+        courier_id=draft.courier_id,
+        store_id=draft.store_id,
+        bike_label=confirmation.bike_label,
+        courier_label=confirmation.courier_label,
+        store_label=confirmation.store_label,
     )
     await state.set_state(TakeBikeForm.confirm)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "📋 <b>Подтвердите взятие байка:</b>\n\n"
-        f"🚲 Байк: <b>{bike_label}</b>\n"
-        f"👤 Курьер: <b>{courier_label}</b>\n"
-        f"🏪 Склад: <b>{store_label}</b>\n\n"
+        f"🚲 Байк: <b>{confirmation.bike_label}</b>\n"
+        f"👤 Курьер: <b>{confirmation.courier_label}</b>\n"
+        f"🏪 Склад: <b>{confirmation.store_label}</b>\n\n"
         "Всё верно?",
         reply_markup=usage_confirm_take_kb(),
     )
@@ -277,12 +265,12 @@ async def take_save(
     await callback.answer()
     data = await state.get_data()
 
-    log = BikeUsageLog(
-        bike_id=data["bike_id"],
-        courier_id=data["courier_id"],
-        store_id=data["store_id"],
-        started_at=datetime.now(),
+    draft = TakeBikeDraft(
+        bike_id=cast("int", data["bike_id"]),
+        courier_id=cast("int", data["courier_id"]),
+        store_id=cast("int", data["store_id"]),
     )
+    log = create_usage_log(draft)
     market_session.add(log)
     await market_session.flush()
 
@@ -358,22 +346,11 @@ async def return_show_active_logs(
         return
     await callback.answer()
 
-    query = apply_store_scope(
-        select(BikeUsageLog)
-        .options(
-            selectinload(BikeUsageLog.bike),
-            selectinload(BikeUsageLog.courier),
-        )
-        .where(BikeUsageLog.ended_at.is_(None))
-        .order_by(BikeUsageLog.started_at.desc()),
-        BikeUsageLog.store_id,
-        bot_user,
+    logs = await list_active_usage_logs(
+        market_session,
+        store_id=callback_data.store_id,
+        bot_user=bot_user,
     )
-    if callback_data.store_id > 0:
-        query = query.where(BikeUsageLog.store_id == callback_data.store_id)
-
-    result = await market_session.execute(query)
-    logs = list(result.scalars().all())
 
     if not logs:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -398,41 +375,28 @@ async def return_confirm(
     """Ask for confirmation before ending the shift."""
     await callback.answer()
 
-    result = await market_session.execute(
-        apply_store_scope(
-            select(BikeUsageLog)
-            .options(
-                selectinload(BikeUsageLog.bike),
-                selectinload(BikeUsageLog.courier),
-                selectinload(BikeUsageLog.store),
-            )
-            .where(BikeUsageLog.id == callback_data.log_id),
-            BikeUsageLog.store_id,
-            bot_user,
-        ),
+    log = await get_active_usage_log(
+        market_session,
+        log_id=callback_data.log_id,
+        bot_user=bot_user,
     )
-    log = result.scalar_one_or_none()
-
-    if log is None or log.ended_at is not None:
+    if log is None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             "⚠️ Смена не найдена или уже завершена.",
             reply_markup=usage_menu_kb(),
         )
         return
 
-    courier_name = log.courier.display_name if log.courier else "—"
-    bike_num = log.bike.bike_number if log.bike else "—"
-    bike_model = log.bike.model if log.bike else ""
-    store_name = log.store.display_name if log.store else "—"
-    started = to_yakutsk(log.started_at).strftime("%d.%m %H:%M")
+    summary = usage_shift_summary(log)
+    started = to_yakutsk(summary.started_at).strftime("%d.%m %H:%M")
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "⚠️ <b>Завершить смену?</b>\n\n"
-        f"🚲 {bike_num} — {bike_model}\n"
-        f"👤 {courier_name}\n"
-        f"🏪 {store_name}\n"
+        f"🚲 {summary.bike_label}\n"
+        f"👤 {summary.courier_name}\n"
+        f"🏪 {summary.store_name}\n"
         f"🕐 Начало: {started}",
-        reply_markup=usage_return_confirm_kb(log.id),
+        reply_markup=usage_return_confirm_kb(summary.log_id),
     )
 
 
@@ -446,45 +410,31 @@ async def return_save(
     """End the shift — set ended_at = now."""
     await callback.answer()
 
-    result = await market_session.execute(
-        apply_store_scope(
-            select(BikeUsageLog)
-            .options(
-                selectinload(BikeUsageLog.bike),
-                selectinload(BikeUsageLog.courier),
-            )
-            .where(BikeUsageLog.id == callback_data.log_id),
-            BikeUsageLog.store_id,
-            bot_user,
-        ),
+    summary = await finish_usage_log(
+        market_session,
+        log_id=callback_data.log_id,
+        bot_user=bot_user,
     )
-    log = result.scalar_one_or_none()
-
-    if log is None or log.ended_at is not None:
+    if summary is None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             "⚠️ Смена не найдена или уже завершена.",
             reply_markup=usage_menu_kb(),
         )
         return
 
-    log.ended_at = datetime.now()
-
-    courier_name = log.courier.display_name if log.courier else "—"
-    bike_num = log.bike.bike_number if log.bike else "—"
-
     logger.info(
         "Usage log ended: log_id={log_id}, bike={bike}, courier={courier}",
-        log_id=log.id,
-        bike=bike_num,
-        courier=courier_name,
+        log_id=summary.log_id,
+        bike=summary.bike_number,
+        courier=summary.courier_name,
     )
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "✅ Смена завершена!\n\n"
-        f"🚲 {bike_num}\n"
-        f"👤 {courier_name}\n"
-        f"🕐 {to_yakutsk(log.started_at).strftime('%H:%M')}"
-        f" → {to_yakutsk(log.ended_at).strftime('%H:%M')}",
+        f"🚲 {summary.bike_number}\n"
+        f"👤 {summary.courier_name}\n"
+        f"🕐 {to_yakutsk(summary.started_at).strftime('%H:%M')}"
+        f" → {to_yakutsk(summary.ended_at).strftime('%H:%M')}",
         reply_markup=usage_menu_kb(),
     )
 
@@ -515,24 +465,9 @@ async def active_choose_store(
 
     stores = await get_accessible_stores(market_session, bot_user)
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    b = InlineKeyboardBuilder()
-    b.button(
-        text="📦 Все склады",
-        callback_data=UsageActiveStoreCB(store_id=0),
-    )
-    for store in stores:
-        b.button(
-            text=f"🏪 {store.display_name}",
-            callback_data=UsageActiveStoreCB(store_id=store.id),
-        )
-    b.button(text="← Назад", callback_data=UsageMenuCB(action="open"))
-    b.adjust(2)
-
     await callback.message.edit_text(  # type: ignore[union-attr]
         "👀 <b>Кто на байке</b>\n\nВыберите склад:",
-        reply_markup=b.as_markup(),
+        reply_markup=usage_active_store_select_kb(stores),
     )
 
 
@@ -550,23 +485,11 @@ async def active_show_shifts(
         return
     await callback.answer()
 
-    query = apply_store_scope(
-        select(BikeUsageLog)
-        .options(
-            selectinload(BikeUsageLog.bike),
-            selectinload(BikeUsageLog.courier),
-            selectinload(BikeUsageLog.store),
-        )
-        .where(BikeUsageLog.ended_at.is_(None))
-        .order_by(BikeUsageLog.started_at.desc()),
-        BikeUsageLog.store_id,
-        bot_user,
+    logs = await list_active_usage_logs(
+        market_session,
+        store_id=callback_data.store_id,
+        bot_user=bot_user,
     )
-    if callback_data.store_id > 0:
-        query = query.where(BikeUsageLog.store_id == callback_data.store_id)
-
-    result = await market_session.execute(query)
-    logs = list(result.scalars().all())
 
     if not logs:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -575,19 +498,8 @@ async def active_show_shifts(
         )
         return
 
-    lines = ["👀 <b>Активные смены</b>", f"Всего: {len(logs)}", ""]
-
-    for log in logs:
-        courier_name = log.courier.display_name if log.courier else "—"
-        bike_num = log.bike.bike_number if log.bike else "—"
-        bike_model = log.bike.model if log.bike else ""
-        store_name = log.store.display_name if log.store else "—"
-        started = to_yakutsk(log.started_at).strftime("%d.%m %H:%M")
-        lines.append(
-            f"🚲 <b>{bike_num}</b> {bike_model}\n"
-            f"   👤 {courier_name} • 🏪 {store_name}\n"
-            f"   🕐 с {started}\n",
-        )
+    summaries = [usage_shift_summary(log) for log in logs]
+    lines = format_active_shift_lines(summaries)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "\n".join(lines),

@@ -6,6 +6,7 @@ import pytest
 
 from app.bot.handlers import registration
 from app.bot.keyboards.callbacks import AdminApprovalCB, AdminRoleSelectCB
+from app.core.admin_user_lookup import phone_lookup_variants
 from app.db.models.admin_user import AdminUser
 from app.db.models.bot_user import BotUser, UserRole
 from app.db.models.bot_user_admin_notification import BotUserAdminNotification
@@ -153,7 +154,7 @@ class _FakeContactMessage(_FakeMessage):
     ],
 )
 def test_phone_lookup_variants(phone_digits: str, expected: set[str]) -> None:
-    assert registration._phone_lookup_variants(phone_digits) == expected
+    assert phone_lookup_variants(phone_digits) == expected
 
 
 @pytest.mark.asyncio

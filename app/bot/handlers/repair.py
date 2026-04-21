@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -37,13 +35,24 @@ from app.bot.keyboards.callbacks import (
     StoreSelectCB,
 )
 from app.bot.states.bike import RepairCompleteForm, RepairPickupForm
+from app.core.repair_flow import (
+    RepairCompletionDraft,
+    RepairPickupDraft,
+    build_completion_confirmation,
+    build_pickup_confirmation,
+    format_pickup_breakdown_label,
+    list_mechanics,
+    list_open_breakdowns,
+    parse_repair_cost,
+    parse_repair_duration,
+    save_repair_completion,
+    save_repair_pickup,
+)
 from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike, BikeStatus
-from app.db.models.bike_breakdown import BikeBreakdown
 from app.db.models.bike_repair import BikeRepair
-from app.db.models.bot_user import BotUser, UserRole
-from app.db.models.store import Store
+from app.db.models.bot_user import BotUser
 
 if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
@@ -197,14 +206,7 @@ async def rp_choose_breakdown(
 
     await state.update_data(bike_id=bike_id)
 
-    # Find open breakdowns for this bike
-    result = await market_session.execute(
-        select(BikeBreakdown)
-        .where(BikeBreakdown.bike_id == bike_id)
-        .order_by(BikeBreakdown.reported_at.desc())
-        .limit(10),
-    )
-    breakdowns = list(result.scalars().all())
+    breakdowns = await list_open_breakdowns(market_session, bike_id=bike_id)
 
     if not breakdowns:
         # No breakdowns — skip directly to mechanic select / auto-assign
@@ -266,13 +268,7 @@ async def _pick_mechanic(
         await _show_pickup_confirm(callback, state, market_session)
         return
 
-    # Supervisor / admin — show mechanic list
-    result = await market_session.execute(
-        select(BotUser)
-        .where(BotUser.role == UserRole.MECHANIC)
-        .order_by(BotUser.name),
-    )
-    mechanics = list(result.scalars().all())
+    mechanics = await list_mechanics(market_session)
 
     if not mechanics:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -319,6 +315,16 @@ async def rp_mechanic_selected(
     await _show_pickup_confirm(callback, state, market_session)
 
 
+def _pickup_draft_from_state(data: dict[str, object]) -> RepairPickupDraft:
+    return RepairPickupDraft(
+        bike_id=cast("int", data["bike_id"]),
+        store_id=cast("int", data["store_id"]),
+        breakdown_id=cast("int | None", data.get("breakdown_id")),
+        mechanic_id=cast("int | None", data.get("mechanic_id")),
+        mechanic_name=cast("str | None", data.get("mechanic_name")),
+    )
+
+
 async def _show_pickup_confirm(
     callback: CallbackQuery,
     state: FSMContext,
@@ -326,39 +332,27 @@ async def _show_pickup_confirm(
 ) -> None:
     """Build and show the repair pickup confirmation screen."""
     data = await state.get_data()
+    draft = _pickup_draft_from_state(data)
+    confirmation = await build_pickup_confirmation(market_session, draft)
 
-    bike = await market_session.get(Bike, data["bike_id"])
-    store_result = await market_session.execute(
-        select(Store).where(Store.id == data["store_id"]),
+    breakdown_label = format_pickup_breakdown_label(
+        confirmation,
+        BREAKDOWN_TYPE_LABEL,
+        BREAKDOWN_TYPE_EMOJI,
     )
-    store = store_result.scalar_one_or_none()
 
-    bike_label = f"{bike.bike_number} — {bike.model}" if bike else "—"
-    store_label = store.display_name if store else "—"
-    mechanic_name = data.get("mechanic_name", "—")
-
-    # Breakdown info
-    breakdown_label = "— (без привязки)"
-    breakdown_id = data.get("breakdown_id")
-    if breakdown_id:
-        bd = await market_session.get(BikeBreakdown, breakdown_id)
-        if bd:
-            bd_emoji = BREAKDOWN_TYPE_EMOJI.get(bd.breakdown_type.value, "❓")
-            bd_type_label = BREAKDOWN_TYPE_LABEL.get(
-                bd.breakdown_type.value, bd.breakdown_type.value,
-            )
-            reported = to_yakutsk(bd.reported_at).strftime("%d.%m.%Y")
-            breakdown_label = f"{bd_emoji} {bd_type_label} ({reported})"
-
-    await state.update_data(bike_label=bike_label, store_label=store_label)
+    await state.update_data(
+        bike_label=confirmation.bike_label,
+        store_label=confirmation.store_label,
+    )
     await state.set_state(RepairPickupForm.confirm)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "📋 <b>Подтвердите забор байка:</b>\n\n"
-        f"🚲 Байк: <b>{bike_label}</b>\n"
-        f"🏪 Склад: <b>{store_label}</b>\n"
+        f"🚲 Байк: <b>{confirmation.bike_label}</b>\n"
+        f"🏪 Склад: <b>{confirmation.store_label}</b>\n"
         f"🔗 Поломка: <b>{breakdown_label}</b>\n"
-        f"🔧 Мастер: <b>{mechanic_name}</b>\n\n"
+        f"🔧 Мастер: <b>{confirmation.mechanic_name}</b>\n\n"
         "Всё верно?",
         reply_markup=repair_pickup_confirm_kb(),
     )
@@ -379,23 +373,11 @@ async def rp_pickup_save(
     """Save the repair pickup record."""
     await callback.answer()
     data = await state.get_data()
-
-    now = datetime.now()
-
-    repair = BikeRepair(
-        bike_id=data["bike_id"],
-        breakdown_id=data.get("breakdown_id"),
-        mechanic_id=data.get("mechanic_id"),
-        mechanic_name=data.get("mechanic_name"),
-        store_id=data["store_id"],
-        picked_up_at=now,
-    )
-    market_session.add(repair)
-
-    # Change bike status -> repair
-    bike = await market_session.get(Bike, data["bike_id"])
-    if bike and bike.status != BikeStatus.REPAIR:
-        bike.status = BikeStatus.REPAIR
+    draft = _pickup_draft_from_state(data)
+    bike = await market_session.get(Bike, draft.bike_id)
+    status_will_change = bike is not None and bike.status != BikeStatus.REPAIR
+    await save_repair_pickup(market_session, draft)
+    if bike and status_will_change:
         logger.info(
             "Bike status changed to repair: bike_id={bike_id}",
             bike_id=bike.id,
@@ -532,18 +514,16 @@ async def rp_complete_duration(
 ) -> None:
     """Receive repair duration, move to cost."""
     text = message.text.strip() if message.text else ""
-    duration = None
-    if text != "-":
-        try:
-            duration = int(text)
-            if duration <= 0:
-                await message.answer("⚠️ Введите положительное число минут.")
-                return
-        except ValueError:
-            await message.answer(
-                "⚠️ Некорректный ввод. Введите число минут или «-» чтобы пропустить.",
-            )
+    try:
+        duration = parse_repair_duration(text)
+    except ValueError as exc:
+        if str(exc) == "duration_must_be_positive":
+            await message.answer("⚠️ Введите положительное число минут.")
             return
+        await message.answer(
+            "⚠️ Некорректный ввод. Введите число минут или «-» чтобы пропустить.",
+        )
+        return
 
     await state.update_data(repair_duration_minutes=duration)
     await state.set_state(RepairCompleteForm.cost)
@@ -562,21 +542,29 @@ async def rp_complete_cost(
 ) -> None:
     """Receive cost, show confirmation."""
     text = message.text.strip() if message.text else ""
-    cost = None
-    if text != "-":
-        try:
-            cost = Decimal(text.replace(",", "."))
-            if cost < 0:
-                await message.answer("⚠️ Стоимость не может быть отрицательной.")
-                return
-        except InvalidOperation:
-            await message.answer(
-                "⚠️ Некорректный ввод. Введите число или «-» чтобы пропустить.",
-            )
+    try:
+        cost = parse_repair_cost(text)
+    except ValueError as exc:
+        if str(exc) == "cost_must_not_be_negative":
+            await message.answer("⚠️ Стоимость не может быть отрицательной.")
             return
+        await message.answer(
+            "⚠️ Некорректный ввод. Введите число или «-» чтобы пропустить.",
+        )
+        return
 
     await state.update_data(cost=str(cost) if cost is not None else None)
     await _show_complete_confirm(message, state, market_session, bot_user)
+
+
+def _completion_draft_from_state(data: dict[str, object]) -> RepairCompletionDraft:
+    cost_raw = cast("str | None", data.get("cost"))
+    return RepairCompletionDraft(
+        repair_id=cast("int", data["repair_id"]),
+        work_description=cast("str | None", data.get("work_description")),
+        repair_duration_minutes=cast("int | None", data.get("repair_duration_minutes")),
+        cost=parse_repair_cost(cost_raw or "-"),
+    )
 
 
 async def _show_complete_confirm(
@@ -587,35 +575,37 @@ async def _show_complete_confirm(
 ) -> None:
     """Build and show the repair completion confirmation screen."""
     data = await state.get_data()
-
-    result = await market_session.execute(
-        apply_store_scope(
-            select(BikeRepair).where(BikeRepair.id == data["repair_id"]),
-            BikeRepair.store_id,
-            bot_user,
-        ),
+    draft = _completion_draft_from_state(data)
+    confirmation = await build_completion_confirmation(
+        market_session,
+        draft,
+        bot_user,
     )
-    repair = result.scalar_one_or_none()
-    bike = repair.bike if repair else None
+    if confirmation is None:
+        await state.clear()
+        text = "⚠️ Ремонт не найден."
+        if isinstance(event, CallbackQuery):
+            await event.message.edit_text(  # type: ignore[union-attr]
+                text,
+                reply_markup=repair_menu_kb(),
+            )
+        else:
+            await event.answer(text, reply_markup=repair_menu_kb())
+        return
 
-    bike_label = f"{bike.bike_number} — {bike.model}" if bike else "—"
-    mechanic_name = repair.mechanic_name if repair else "—"
-    work_desc = data.get("work_description") or "—"
-    duration = data.get("repair_duration_minutes")
-    duration_label = f"{duration} мин." if duration else "—"
-    cost = data.get("cost")
-    cost_label = f"{cost} ₽" if cost else "—"
-
-    await state.update_data(bike_label=bike_label, mechanic_name=mechanic_name)
+    await state.update_data(
+        bike_label=confirmation.bike_label,
+        mechanic_name=confirmation.mechanic_name,
+    )
     await state.set_state(RepairCompleteForm.confirm)
 
     text = (
         "📋 <b>Подтвердите завершение ремонта:</b>\n\n"
-        f"🚲 Байк: <b>{bike_label}</b>\n"
-        f"🔧 Мастер: <b>{mechanic_name}</b>\n"
-        f"📝 Работы: {work_desc}\n"
-        f"⏱ Время: <b>{duration_label}</b>\n"
-        f"💰 Стоимость: <b>{cost_label}</b>\n\n"
+        f"🚲 Байк: <b>{confirmation.bike_label}</b>\n"
+        f"🔧 Мастер: <b>{confirmation.mechanic_name}</b>\n"
+        f"📝 Работы: {confirmation.work_description_label}\n"
+        f"⏱ Время: <b>{confirmation.duration_label}</b>\n"
+        f"💰 Стоимость: <b>{confirmation.cost_label}</b>\n\n"
         "Всё верно?"
     )
 
@@ -644,18 +634,9 @@ async def rp_complete_save(
     """Save the repair completion."""
     await callback.answer()
     data = await state.get_data()
-
-    now = datetime.now()
-
-    result = await market_session.execute(
-        apply_store_scope(
-            select(BikeRepair).where(BikeRepair.id == data["repair_id"]),
-            BikeRepair.store_id,
-            bot_user,
-        ),
-    )
-    repair = result.scalar_one_or_none()
-    if not repair:
+    draft = _completion_draft_from_state(data)
+    saved = await save_repair_completion(market_session, draft, bot_user)
+    if saved is None:
         await callback.message.edit_text(  # type: ignore[union-attr]
             "⚠️ Ремонт не найден.",
             reply_markup=repair_menu_kb(),
@@ -663,19 +644,11 @@ async def rp_complete_save(
         await state.clear()
         return
 
-    repair.completed_at = now
-    repair.work_description = data.get("work_description")
-    repair.repair_duration_minutes = data.get("repair_duration_minutes")
-    cost_str = data.get("cost")
-    repair.cost = Decimal(cost_str) if cost_str else None
-
-    # Change bike status -> online
-    bike = await market_session.get(Bike, repair.bike_id)
-    if bike and bike.status == BikeStatus.REPAIR:
-        bike.status = BikeStatus.ONLINE
+    repair = saved.repair
+    if saved.bike_status_changed:
         logger.info(
             "Bike status changed to online: bike_id={bike_id}",
-            bike_id=bike.id,
+            bike_id=repair.bike_id,
         )
 
     logger.info(
@@ -687,9 +660,12 @@ async def rp_complete_save(
 
     await state.clear()
 
-    duration = data.get("repair_duration_minutes")
-    duration_label = f"{duration} мин." if duration else "—"
-    cost_label = f"{cost_str} ₽" if cost_str else "—"
+    duration_label = (
+        f"{draft.repair_duration_minutes} мин."
+        if draft.repair_duration_minutes
+        else "—"
+    )
+    cost_label = f"{draft.cost} ₽" if draft.cost else "—"
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "✅ Ремонт завершён!\n\n"

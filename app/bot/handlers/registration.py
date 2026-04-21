@@ -15,7 +15,6 @@ from aiogram.types import (
 )
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.sql import func as sql_func
 
 from app.bot.keyboards.callbacks import (
     AdminApprovalCB,
@@ -26,9 +25,14 @@ from app.bot.keyboards.callbacks import (
 )
 from app.bot.states.bike import RegistrationForm
 from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
+from app.core.admin_user_lookup import normalize_phone
+from app.core.registration_flow import (
+    assign_role,
+    assign_supervisor_role,
+    create_registration_application,
+)
 from app.core.store_access import get_accessible_stores
-from app.db.models.admin_user import AdminUser
-from app.db.models.bot_user import ROLE_LABEL, BotUser, UserRole
+from app.db.models.bot_user import BotUser, UserRole
 from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 
 if TYPE_CHECKING:
@@ -153,23 +157,6 @@ def _supervisor_store_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _normalize_phone(phone: str) -> str:
-    """Strip everything except digits from a phone number."""
-    return "".join(c for c in phone if c.isdigit())
-
-
-def _phone_lookup_variants(phone_digits: str) -> set[str]:
-    """Return phone variants used to match admin panel records."""
-    variants = {phone_digits}
-    if phone_digits.startswith("7") and len(phone_digits) == 11:
-        variants.add("8" + phone_digits[1:])
-        variants.add("+" + phone_digits)
-    elif phone_digits.startswith("8") and len(phone_digits) == 11:
-        variants.add("7" + phone_digits[1:])
-        variants.add("+7" + phone_digits[1:])
-    return variants
-
-
 async def _notify_other_admins(
     bot: Bot,
     market_session: AsyncSession,
@@ -250,7 +237,11 @@ async def reg_contact(
 ) -> None:
     """Receive shared contact — validate, lookup boom_admin_users, create BotUser."""
     contact = message.contact
-    tg_id = message.from_user.id  # type: ignore[union-attr]
+    from_user = message.from_user
+    if from_user is None:
+        await message.answer("⚠️ Не удалось определить Telegram-пользователя.")
+        return
+    tg_id = from_user.id
 
     if contact is None:
         await message.answer(
@@ -269,7 +260,7 @@ async def reg_contact(
         return
 
     phone_raw = contact.phone_number or ""
-    phone_digits = _normalize_phone(phone_raw)
+    phone_digits = normalize_phone(phone_raw)
 
     if not phone_digits:
         await message.answer(
@@ -278,21 +269,13 @@ async def reg_contact(
         )
         return
 
-    # 2. Search boom_admin_users by phone (try multiple formats)
-    admin_user = None
-    for variant in _phone_lookup_variants(phone_digits):
-        result = await market_session.execute(
-            select(AdminUser).where(
-                sql_func.replace(
-                    sql_func.replace(AdminUser.phone, "+", ""), " ", "",
-                ) == variant,
-            ).limit(1),
-        )
-        admin_user = result.scalar_one_or_none()
-        if admin_user:
-            break
-
-    if not admin_user:
+    # 2. Search boom_admin_users by phone and create a pending bot user
+    application = await create_registration_application(
+        market_session,
+        telegram_id=tg_id,
+        phone_raw=phone_raw,
+    )
+    if application is None:
         await state.clear()
         await message.answer(
             "❌ <b>Номер не найден в системе</b>\n\n"
@@ -303,20 +286,8 @@ async def reg_contact(
         )
         return
 
-    # 3. Create BotUser with name from admin panel + admin_user_id
-    surname = f" {admin_user.surname}" if admin_user.surname else ""
-    name = f"{admin_user.name}{surname}"
-    if not name.strip():
-        name = "—"
-
-    bot_user = BotUser(
-        telegram_id=tg_id,
-        admin_user_id=admin_user.id,
-        name=name,
-        role=UserRole.PENDING,
-    )
-    market_session.add(bot_user)
-    await market_session.flush()
+    bot_user = application.bot_user
+    name = application.name
 
     await state.clear()
 
@@ -336,7 +307,7 @@ async def reg_contact(
     )
 
     # 4. Notify admin
-    tg_username = message.from_user.username or ""  # type: ignore[union-attr]
+    tg_username = from_user.username or ""
     tg_link = f"@{tg_username}" if tg_username else f"<code>{phone_raw}</code>"
     admin_message = (
         "🆕 <b>Новая заявка на доступ</b>\n\n"
@@ -511,9 +482,7 @@ async def admin_assign_role(
         )
         return
 
-    user.role = callback_data.role
-    user.store_ids = None
-    role_label = ROLE_LABEL.get(callback_data.role, callback_data.role)
+    role_label = assign_role(user, callback_data.role)
 
     logger.info(
         "Role assigned: user={name} role={role}",
@@ -656,8 +625,7 @@ async def admin_save_supervisor_role(
         store.display_name for store in stores if store.id in set(store_ids)
     ]
 
-    user.role = UserRole.SUPERVISOR
-    user.set_assigned_store_ids(store_ids)
+    role_label = assign_supervisor_role(user, store_ids)
     await state.clear()
 
     logger.info(
@@ -668,7 +636,7 @@ async def admin_save_supervisor_role(
 
     store_lines = "\n".join(f"• {name}" for name in store_names)
     await callback.message.edit_text(  # type: ignore[union-attr]
-        f"✅ <b>{user.name}</b> → {ROLE_LABEL[UserRole.SUPERVISOR]}\n\n"
+        f"✅ <b>{user.name}</b> → {role_label}\n\n"
         "Привязанные склады:\n"
         f"{store_lines}",
     )
@@ -679,7 +647,7 @@ async def admin_save_supervisor_role(
         user.id,
         callback.from_user.id,
         f"✅ <b>{user.name}</b> уже одобрен.\n\n"
-        f"Роль: {ROLE_LABEL[UserRole.SUPERVISOR]}\n"
+        f"Роль: {role_label}\n"
         "Привязанные склады:\n"
         f"{store_lines}",
     )
@@ -688,7 +656,7 @@ async def admin_save_supervisor_role(
         await bot.send_message(
             user.telegram_id,
             f"🎉 <b>Вам выдан доступ!</b>\n\n"
-            f"Роль: {ROLE_LABEL[UserRole.SUPERVISOR]}\n"
+            f"Роль: {role_label}\n"
             "Доступные склады:\n"
             f"{store_lines}\n\n"
             "Нажмите /start чтобы начать работу.",

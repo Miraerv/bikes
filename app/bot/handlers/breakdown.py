@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from aiogram import F, Router
 from loguru import logger
@@ -16,6 +15,9 @@ from app.bot.keyboards.builders import (
     BREAKDOWN_TYPE_LABEL,
     breakdown_bike_select_kb,
     breakdown_confirm_kb,
+    breakdown_courier_select_kb,
+    breakdown_detail_kb,
+    breakdown_history_kb,
     breakdown_menu_kb,
     breakdown_photo_kb,
     breakdown_type_kb,
@@ -34,13 +36,18 @@ from app.bot.keyboards.callbacks import (
     StoreSelectCB,
 )
 from app.bot.states.bike import BreakdownForm
+from app.core.admin_user_lookup import search_admin_users_by_name
+from app.core.breakdown_flow import (
+    BreakdownDraft,
+    build_breakdown_confirmation,
+    detect_last_usage_courier,
+    save_breakdown,
+)
 from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
+from app.db.models.admin_user import AdminUser
 from app.db.models.bike import Bike, BikeStatus
-from app.db.models.bike_breakdown import BikeBreakdown, BreakdownType
-from app.db.models.bike_breakdown_photo import BikeBreakdownPhoto
-from app.db.models.bike_usage_log import BikeUsageLog
-from app.db.models.store import Store
+from app.db.models.bike_breakdown import BikeBreakdown
 
 if TYPE_CHECKING:
     from aiogram import Bot
@@ -265,20 +272,17 @@ async def bd_photos_done(
     data = await state.get_data()
 
     # BIKE-42 — Auto-detect last courier from usage log
-    last_log_result = await market_session.execute(
-        select(BikeUsageLog)
-        .options(selectinload(BikeUsageLog.courier))
-        .where(BikeUsageLog.bike_id == data["bike_id"])
-        .order_by(BikeUsageLog.started_at.desc())
-        .limit(1),
+    last_courier = await detect_last_usage_courier(
+        market_session,
+        bike_id=cast("int", data["bike_id"]),
     )
-    last_log = last_log_result.scalar_one_or_none()
 
-    if last_log and last_log.courier_id:
+    if last_courier:
         # Auto-detected → go straight to confirmation
-        courier_id = last_log.courier_id
-        courier_name = last_log.courier.display_name if last_log.courier else "—"
-        await state.update_data(courier_id=courier_id, courier_name=courier_name)
+        await state.update_data(
+            courier_id=last_courier.courier_id,
+            courier_name=last_courier.courier_name,
+        )
         await _show_bd_confirm(callback, state, market_session)
     else:
         # No usage log — ask supervisor to type courier name
@@ -296,28 +300,12 @@ async def bd_search_courier(
     market_session: AsyncSession,
 ) -> None:
     """Search couriers by name and show matching results."""
-    from app.bot.keyboards.builders import breakdown_courier_select_kb
-    from app.db.models.admin_user import AdminUser
-
     query_text = message.text.strip() if message.text else ""
     if not query_text:
         await message.answer("⚠️ Введите имя курьера для поиска.")
         return
 
-    from sqlalchemy import or_
-
-    result = await market_session.execute(
-        select(AdminUser)
-        .where(
-            or_(
-                AdminUser.name.ilike(f"%{query_text}%"),
-                AdminUser.surname.ilike(f"%{query_text}%"),
-            ),
-        )
-        .order_by(AdminUser.name)
-        .limit(10),
-    )
-    couriers = list(result.scalars().all())
+    couriers = await search_admin_users_by_name(market_session, query_text, limit=10)
 
     if not couriers:
         await message.answer(
@@ -343,8 +331,6 @@ async def bd_manual_courier_select(
     """Supervisor manually picked the courier — show confirmation."""
     await callback.answer()
 
-    from app.db.models.admin_user import AdminUser
-
     courier = await market_session.get(AdminUser, callback_data.courier_id)
     courier_name = courier.display_name if courier else "—"
 
@@ -355,6 +341,18 @@ async def bd_manual_courier_select(
     await _show_bd_confirm(callback, state, market_session)
 
 
+def _breakdown_draft_from_state(data: dict[str, object]) -> BreakdownDraft:
+    return BreakdownDraft(
+        bike_id=cast("int", data["bike_id"]),
+        store_id=cast("int", data["store_id"]),
+        breakdown_type=cast("str", data["breakdown_type"]),
+        description=cast("str | None", data.get("description")),
+        photo_ids=tuple(cast("list[str]", data.get("photo_ids", []))),
+        courier_id=cast("int", data["courier_id"]),
+        courier_name=cast("str", data.get("courier_name", "—")),
+    )
+
+
 async def _show_bd_confirm(
     callback: CallbackQuery,
     state: FSMContext,
@@ -362,33 +360,27 @@ async def _show_bd_confirm(
 ) -> None:
     """Build and show the breakdown confirmation screen."""
     data = await state.get_data()
+    draft = _breakdown_draft_from_state(data)
+    confirmation = await build_breakdown_confirmation(market_session, draft)
 
-    bike = await market_session.get(Bike, data["bike_id"])
-    store_result = await market_session.execute(
-        select(Store).where(Store.id == data["store_id"]),
-    )
-    store = store_result.scalar_one_or_none()
-
-    bike_label = f"{bike.bike_number} — {bike.model}" if bike else "—"
-    store_label = store.display_name if store else "—"
-    bd_type = data["breakdown_type"]
+    bd_type = draft.breakdown_type
     bd_emoji = BREAKDOWN_TYPE_EMOJI.get(bd_type, "❓")
     bd_label = BREAKDOWN_TYPE_LABEL.get(bd_type, bd_type)
-    desc = data.get("description") or "—"
-    photo_count = len(data.get("photo_ids", []))
-    courier_name = data.get("courier_name", "—")
 
-    await state.update_data(bike_label=bike_label, store_label=store_label)
+    await state.update_data(
+        bike_label=confirmation.bike_label,
+        store_label=confirmation.store_label,
+    )
     await state.set_state(BreakdownForm.confirm)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         "📋 <b>Подтвердите поломку:</b>\n\n"
-        f"🚲 Байк: <b>{bike_label}</b>\n"
-        f"🏪 Склад: <b>{store_label}</b>\n"
+        f"🚲 Байк: <b>{confirmation.bike_label}</b>\n"
+        f"🏪 Склад: <b>{confirmation.store_label}</b>\n"
         f"{bd_emoji} Тип: <b>{bd_label}</b>\n"
-        f"📝 Описание: {desc}\n"
-        f"📷 Фото: <b>{photo_count} шт.</b>\n"
-        f"👤 Курьер: <b>{courier_name}</b>\n\n"
+        f"📝 Описание: {confirmation.description_label}\n"
+        f"📷 Фото: <b>{confirmation.photo_count} шт.</b>\n"
+        f"👤 Курьер: <b>{draft.courier_name}</b>\n\n"
         "Всё верно?",
         reply_markup=breakdown_confirm_kb(),
     )
@@ -409,58 +401,30 @@ async def bd_save(
     """Save the breakdown record."""
     await callback.answer()
     data = await state.get_data()
+    draft = _breakdown_draft_from_state(data)
+    created = await save_breakdown(market_session, draft)
 
-    now = datetime.now()
-
-    # Use courier_id as reported_by for now (до Этапа 9 — Роли)
-    courier_id = data.get("courier_id")
-    reported_by = courier_id
-
-    breakdown = BikeBreakdown(
-        bike_id=data["bike_id"],
-        courier_id=courier_id,
-        store_id=data["store_id"],
-        reported_by=reported_by,
-        breakdown_type=BreakdownType(data["breakdown_type"]),
-        description=data.get("description"),
-        reported_at=now,
-    )
-    market_session.add(breakdown)
-    await market_session.flush()  # get breakdown.id
-
-    # Save photos (BIKE-41)
-    photo_ids: list[str] = data.get("photo_ids", [])
-    for file_id in photo_ids:
-        photo = BikeBreakdownPhoto(
-            breakdown_id=breakdown.id,
-            photo_url=file_id,
-        )
-        market_session.add(photo)
-
-    # BIKE-43 — Auto-change bike status to inspection
-    bike = await market_session.get(Bike, data["bike_id"])
-    if bike and bike.status == BikeStatus.ONLINE:
-        bike.status = BikeStatus.INSPECTION
+    if created.bike_status_changed:
         logger.info(
             "Bike status changed to inspection: bike_id={bike_id}",
-            bike_id=bike.id,
+            bike_id=draft.bike_id,
         )
 
     logger.info(
         "Breakdown created: id={bd_id}, bike={bike}, type={bd_type}, courier={courier}",
-        bd_id=breakdown.id,
+        bd_id=created.breakdown_id,
         bike=data.get("bike_label"),
-        bd_type=data["breakdown_type"],
-        courier=data.get("courier_name"),
+        bd_type=draft.breakdown_type,
+        courier=draft.courier_name,
     )
 
     await state.clear()
     await callback.message.edit_text(  # type: ignore[union-attr]
         "✅ Поломка зафиксирована!\n\n"
         f"🚲 {data['bike_label']}\n"
-        f"⚠️ {BREAKDOWN_TYPE_LABEL.get(data['breakdown_type'], data['breakdown_type'])}\n"
-        f"📷 Фото: {len(photo_ids)} шт.\n"
-        f"👤 Курьер: {data.get('courier_name', '—')}",
+        f"⚠️ {BREAKDOWN_TYPE_LABEL.get(draft.breakdown_type, draft.breakdown_type)}\n"
+        f"📷 Фото: {len(draft.photo_ids)} шт.\n"
+        f"👤 Курьер: {draft.courier_name}",
         reply_markup=breakdown_menu_kb(),
     )
 
@@ -512,8 +476,6 @@ async def show_breakdown_history(
         .limit(10),
     )
     breakdowns = list(result.scalars().all())
-
-    from app.bot.keyboards.builders import breakdown_history_kb
 
     if not breakdowns:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -581,8 +543,6 @@ async def breakdown_detail(
     )
     if bd.description:
         text += f"\n📝 <b>Описание:</b>\n{bd.description}\n"
-
-    from app.bot.keyboards.builders import breakdown_detail_kb
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         text,

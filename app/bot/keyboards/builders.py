@@ -33,6 +33,7 @@ from app.bot.keyboards.callbacks import (
     RepairSelectCB,
     StatusFilterCB,
     StoreSelectCB,
+    UsageActiveStoreCB,
     UsageBikeSelectCB,
     UsageConfirmCB,
     UsageCourierSelectCB,
@@ -263,6 +264,23 @@ def usage_menu_kb() -> InlineKeyboardMarkup:
     b.button(text="👀 Кто на байке", callback_data=UsageMenuCB(action="active"))
     b.button(text="← Назад", callback_data=UsageMenuCB(action="back"))
     b.adjust(2, 1, 1)
+    return b.as_markup()
+
+
+def usage_active_store_select_kb(stores: list[Store]) -> InlineKeyboardMarkup:
+    """Store filter for active shifts."""
+    b = InlineKeyboardBuilder()
+    b.button(
+        text="📦 Все склады",
+        callback_data=UsageActiveStoreCB(store_id=0),
+    )
+    for store in stores:
+        b.button(
+            text=f"🏪 {store.display_name}",
+            callback_data=UsageActiveStoreCB(store_id=store.id),
+        )
+    b.button(text="← Назад", callback_data=UsageMenuCB(action="open"))
+    b.adjust(2)
     return b.as_markup()
 
 
