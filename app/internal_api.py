@@ -6,7 +6,7 @@ Endpoint: POST /api/signal
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from aiohttp import web
 from loguru import logger
@@ -60,6 +60,11 @@ _COURIER_SHIFT_ORDERS_QUERY = text("""
         AND bdd.layer IN (1, 2)
 """)
 
+_MAX_DELIVERY_MINUTES_BY_LAYER = {
+    1: 45,
+    2: 60,
+}
+
 
 def _get_sla_emoji(sla: float) -> str:
     if sla >= 95:
@@ -69,8 +74,13 @@ def _get_sla_emoji(sla: float) -> str:
     return "🔴"
 
 
+def _is_order_within_sla(layer: int, minutes: int) -> bool:
+    max_minutes = _MAX_DELIVERY_MINUTES_BY_LAYER.get(layer)
+    return max_minutes is not None and minutes <= max_minutes
+
+
 async def _get_shift_stats(
-    shift_id: int,
+    shift_id: int | None,
     admin_user_id: int,
 ) -> tuple[str, int, float | None]:
     """Return (courier_name, total_orders, sla%) for a finished shift."""
@@ -105,17 +115,17 @@ async def _get_shift_stats(
             layer = int(layer) if layer is not None else 0
             minutes = full_time or 0
             total += 1
-            if (layer == 1 and minutes <= 45) or (layer == 2 and minutes <= 60):
+            if _is_order_within_sla(layer, minutes):
                 good += 1
 
         sla = (good / total * 100) if total else None
         return name, total, sla
 
 
-async def _handle_shift_ended(bot: Bot, payload: dict) -> None:
+async def _handle_shift_ended(bot: Bot, payload: dict[str, object]) -> None:
     """Send shift-ended notifications to courier, admin, and supervisors."""
-    admin_user_id = payload.get("admin_user_id")
-    shift_id = payload.get("shift_id")
+    admin_user_id = cast("int | None", payload.get("admin_user_id"))
+    shift_id = cast("int | None", payload.get("shift_id"))
 
     if not admin_user_id:
         logger.warning("shift_ended signal missing admin_user_id")

@@ -28,6 +28,20 @@ class _FakeBot:
             raise RuntimeError("boom")
 
 
+@pytest.mark.parametrize(
+    ("layer", "minutes", "expected"),
+    [
+        (1, 45, True),
+        (1, 46, False),
+        (2, 60, True),
+        (2, 61, False),
+        (0, 0, False),
+    ],
+)
+def test_is_order_within_sla(layer: int, minutes: int, expected: bool) -> None:
+    assert internal_api._is_order_within_sla(layer, minutes) is expected
+
+
 @pytest.mark.asyncio
 async def test_handle_shift_ended_notifies_all_admins_even_if_one_fails(
     monkeypatch: pytest.MonkeyPatch,
