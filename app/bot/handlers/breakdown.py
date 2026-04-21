@@ -39,13 +39,14 @@ from app.core.breakdown_flow import (
     BreakdownDraft,
     build_breakdown_confirmation,
     detect_last_usage_courier,
+    list_breakdown_candidate_bikes,
     save_breakdown,
 )
 from app.core.display import breakdown_type_emoji, breakdown_type_label
 from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.admin_user import AdminUser
-from app.db.models.bike import Bike, BikeStatus
+from app.db.models.bike import Bike
 from app.db.models.bike_breakdown import BikeBreakdown
 
 if TYPE_CHECKING:
@@ -133,12 +134,7 @@ async def bd_choose_bike(
     await callback.answer()
     store_id = callback_data.store_id
 
-    result = await market_session.execute(
-        select(Bike)
-        .where(Bike.store_id == store_id, Bike.status != BikeStatus.DECOMMISSIONED)
-        .order_by(Bike.bike_number),
-    )
-    bikes = list(result.scalars().all())
+    bikes = await list_breakdown_candidate_bikes(market_session, store_id=store_id)
 
     if not bikes:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -495,6 +491,38 @@ async def show_breakdown_history(
 # ── Breakdown detail ───────────────────────────────────────────────────
 
 
+def _format_breakdown_detail_text(bd: BikeBreakdown) -> str:
+    courier_name = bd.courier.display_name if bd.courier else "—"
+    reporter_name = bd.reporter.display_name if bd.reporter else "—"
+    reported = to_yakutsk(bd.reported_at).strftime("%d.%m.%Y %H:%M")
+    bike_num = _breakdown_bike_number(bd)
+    photo_count = len(bd.photos) if bd.photos else 0
+
+    text = (
+        f"{breakdown_type_emoji(bd.breakdown_type)} "
+        f"<b>{breakdown_type_label(bd.breakdown_type)}</b>\n\n"
+        f"🚲 Байк: <b>#{bike_num}</b>\n"
+        f"👤 Курьер: <b>{courier_name}</b>\n"
+        f"📋 Зафиксировал: <b>{reporter_name}</b>\n"
+        f"🕐 Дата: <b>{reported}</b>\n"
+        f"📷 Фото: <b>{photo_count} шт.</b>\n"
+    )
+    if bd.description:
+        text += f"\n📝 <b>Описание:</b>\n{bd.description}\n"
+    return text
+
+
+def _format_breakdown_photo_caption(bd: BikeBreakdown) -> str:
+    return (
+        f"{breakdown_type_emoji(bd.breakdown_type)} "
+        f"{breakdown_type_label(bd.breakdown_type)} — байк #{_breakdown_bike_number(bd)}"
+    )
+
+
+def _breakdown_bike_number(bd: BikeBreakdown) -> str:
+    return bd.bike.bike_number if bd.bike else "—"
+
+
 @router.callback_query(BreakdownDetailCB.filter())
 async def breakdown_detail(
     callback: CallbackQuery,
@@ -524,34 +552,13 @@ async def breakdown_detail(
         )
         return
 
-    courier_name = bd.courier.display_name if bd.courier else "—"
-    reporter_name = bd.reporter.display_name if bd.reporter else "—"
-    reported = to_yakutsk(bd.reported_at).strftime("%d.%m.%Y %H:%M")
-    bike_num = bd.bike.bike_number if bd.bike else "—"
-    photo_count = len(bd.photos) if bd.photos else 0
-
-    text = (
-        f"{breakdown_type_emoji(bd.breakdown_type)} "
-        f"<b>{breakdown_type_label(bd.breakdown_type)}</b>\n\n"
-        f"🚲 Байк: <b>#{bike_num}</b>\n"
-        f"👤 Курьер: <b>{courier_name}</b>\n"
-        f"📋 Зафиксировал: <b>{reporter_name}</b>\n"
-        f"🕐 Дата: <b>{reported}</b>\n"
-        f"📷 Фото: <b>{photo_count} шт.</b>\n"
-    )
-    if bd.description:
-        text += f"\n📝 <b>Описание:</b>\n{bd.description}\n"
-
     await callback.message.edit_text(  # type: ignore[union-attr]
-        text,
+        _format_breakdown_detail_text(bd),
         reply_markup=breakdown_detail_kb(callback_data.bike_id),
     )
 
     # Send photos as separate messages
     chat_id = callback.message.chat.id  # type: ignore[union-attr]
-    caption = (
-        f"{breakdown_type_emoji(bd.breakdown_type)} "
-        f"{breakdown_type_label(bd.breakdown_type)} — байк #{bike_num}"
-    )
+    caption = _format_breakdown_photo_caption(bd)
     for photo in bd.photos or []:
         await bot.send_photo(chat_id, photo.photo_url, caption=caption)

@@ -117,11 +117,85 @@ async def list_open_breakdowns(
     return list(result.scalars().all())
 
 
+async def list_repair_candidate_bikes(
+    session: AsyncSession,
+    *,
+    store_id: int,
+) -> list[Bike]:
+    """Load bikes that can be selected for repair pickup."""
+    result = await session.execute(
+        select(Bike)
+        .where(
+            Bike.store_id == store_id,
+            Bike.status.in_([BikeStatus.INSPECTION, BikeStatus.REPAIR]),
+        )
+        .order_by(Bike.bike_number),
+    )
+    return list(result.scalars().all())
+
+
 async def list_mechanics(session: AsyncSession) -> list[BotUser]:
     result = await session.execute(
         select(BotUser)
         .where(BotUser.role == UserRole.MECHANIC)
         .order_by(BotUser.name),
+    )
+    return list(result.scalars().all())
+
+
+async def list_active_repairs(
+    session: AsyncSession,
+    bot_user: BotUser | None,
+) -> list[BikeRepair]:
+    """Load active repairs available to the current user."""
+    result = await session.execute(
+        apply_store_scope(
+            select(BikeRepair)
+            .options(selectinload(BikeRepair.bike))
+            .where(BikeRepair.completed_at.is_(None))
+            .order_by(BikeRepair.picked_up_at.desc()),
+            BikeRepair.store_id,
+            bot_user,
+        ),
+    )
+    return list(result.scalars().all())
+
+
+async def get_repair_for_completion(
+    session: AsyncSession,
+    *,
+    repair_id: int,
+    bot_user: BotUser | None,
+) -> BikeRepair | None:
+    """Load one repair available to the current user for completion flow."""
+    result = await session.execute(
+        apply_store_scope(
+            select(BikeRepair)
+            .options(selectinload(BikeRepair.bike))
+            .where(BikeRepair.id == repair_id),
+            BikeRepair.store_id,
+            bot_user,
+        ),
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_repairs_for_mechanic(
+    session: AsyncSession,
+    *,
+    mechanic_id: int,
+    limit: int = 15,
+) -> list[BikeRepair]:
+    """Load the latest repairs assigned to a mechanic."""
+    result = await session.execute(
+        select(BikeRepair)
+        .options(
+            selectinload(BikeRepair.bike),
+            selectinload(BikeRepair.store),
+        )
+        .where(BikeRepair.mechanic_id == mechanic_id)
+        .order_by(BikeRepair.picked_up_at.desc())
+        .limit(limit),
     )
     return list(result.scalars().all())
 
@@ -192,16 +266,11 @@ async def build_completion_confirmation(
     bot_user: BotUser | None,
 ) -> RepairCompletionConfirmation | None:
     """Load display data for the repair completion confirmation phase."""
-    result = await session.execute(
-        apply_store_scope(
-            select(BikeRepair)
-            .options(selectinload(BikeRepair.bike))
-            .where(BikeRepair.id == draft.repair_id),
-            BikeRepair.store_id,
-            bot_user,
-        ),
+    repair = await get_repair_for_completion(
+        session,
+        repair_id=draft.repair_id,
+        bot_user=bot_user,
     )
-    repair = result.scalar_one_or_none()
     if repair is None:
         return None
 
@@ -226,14 +295,11 @@ async def save_repair_completion(
     *,
     completed_at: datetime | None = None,
 ) -> SavedRepairCompletion | None:
-    result = await session.execute(
-        apply_store_scope(
-            select(BikeRepair).where(BikeRepair.id == draft.repair_id),
-            BikeRepair.store_id,
-            bot_user,
-        ),
+    repair = await get_repair_for_completion(
+        session,
+        repair_id=draft.repair_id,
+        bot_user=bot_user,
     )
-    repair = result.scalar_one_or_none()
     if repair is None:
         return None
 

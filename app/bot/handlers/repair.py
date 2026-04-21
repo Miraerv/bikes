@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING, cast
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 from loguru import logger
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.bot.keyboards.builders import (
     main_menu_kb,
@@ -40,22 +38,27 @@ from app.core.repair_flow import (
     build_completion_confirmation,
     build_pickup_confirmation,
     format_pickup_breakdown_label,
+    get_repair_for_completion,
+    list_active_repairs,
     list_mechanics,
     list_open_breakdowns,
+    list_repair_candidate_bikes,
+    list_repairs_for_mechanic,
     parse_repair_cost,
     parse_repair_duration,
     save_repair_completion,
     save_repair_pickup,
 )
-from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
+from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike, BikeStatus
-from app.db.models.bike_repair import BikeRepair
 from app.db.models.bot_user import BotUser
 
 if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.bike_repair import BikeRepair
 
 router = Router(name="repair")
 
@@ -132,15 +135,7 @@ async def rp_choose_bike(
     await callback.answer()
     store_id = callback_data.store_id
 
-    result = await market_session.execute(
-        select(Bike)
-        .where(
-            Bike.store_id == store_id,
-            Bike.status.in_([BikeStatus.INSPECTION, BikeStatus.REPAIR]),
-        )
-        .order_by(Bike.bike_number),
-    )
-    bikes = list(result.scalars().all())
+    bikes = await list_repair_candidate_bikes(market_session, store_id=store_id)
 
     if not bikes:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -405,17 +400,7 @@ async def rp_complete_start(
     """Show list of active (in-progress) repairs."""
     await callback.answer()
 
-    result = await market_session.execute(
-        apply_store_scope(
-            select(BikeRepair)
-            .options(selectinload(BikeRepair.bike))
-            .where(BikeRepair.completed_at.is_(None))
-            .order_by(BikeRepair.picked_up_at.desc()),
-            BikeRepair.store_id,
-            bot_user,
-        ),
-    )
-    repairs = list(result.scalars().all())
+    repairs = await list_active_repairs(market_session, bot_user)
 
     if not repairs:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -443,14 +428,11 @@ async def rp_complete_select(
     await callback.answer()
     repair_id = callback_data.repair_id
 
-    result = await market_session.execute(
-        apply_store_scope(
-            select(BikeRepair).where(BikeRepair.id == repair_id),
-            BikeRepair.store_id,
-            bot_user,
-        ),
+    repair = await get_repair_for_completion(
+        market_session,
+        repair_id=repair_id,
+        bot_user=bot_user,
     )
-    repair = result.scalar_one_or_none()
     if not repair:
         await callback.message.edit_text(  # type: ignore[union-attr]
             "⚠️ Ремонт не найден.",
@@ -673,6 +655,35 @@ async def rp_complete_cancel(callback: CallbackQuery, state: FSMContext) -> None
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _format_my_repairs_text(repairs: list[BikeRepair], *, mechanic_name: str) -> str:
+    lines = [f"📋 <b>Ремонты — {mechanic_name}</b>", ""]
+    lines.extend(_format_my_repair_line(repair) for repair in repairs)
+    return "\n".join(lines)
+
+
+def _format_my_repair_line(repair: BikeRepair) -> str:
+    bike_num = repair.bike.bike_number if repair.bike else "—"
+    bike_model = repair.bike.model if repair.bike else ""
+    picked = to_yakutsk(repair.picked_up_at).strftime("%d.%m.%Y %H:%M")
+
+    status_icon = "🔴" if repair.completed_at is None else "🟢"
+    completed = (
+        to_yakutsk(repair.completed_at).strftime("%d.%m.%Y %H:%M")
+        if repair.completed_at
+        else "в работе"
+    )
+    cost_str = f"{repair.cost} ₽" if repair.cost else "—"
+
+    return (
+        f"{status_icon} <b>{bike_num}</b> {bike_model}\n"
+        f"   📅 Забрал: {picked}\n"
+        f"   📅 Готов: {completed}\n"
+        f"   💰 {cost_str}"
+        + (f"\n   📝 {repair.work_description}" if repair.work_description else "")
+        + "\n"
+    )
+
+
 @router.callback_query(RepairMenuCB.filter(F.action == "my_repairs"))
 async def rp_my_repairs(
     callback: CallbackQuery,
@@ -690,18 +701,7 @@ async def rp_my_repairs(
         )
         return
 
-    # Find repairs by mechanic_id = bot_user.id (from bike_bot_roles)
-    repairs_result = await market_session.execute(
-        select(BikeRepair)
-        .options(
-            selectinload(BikeRepair.bike),
-            selectinload(BikeRepair.store),
-        )
-        .where(BikeRepair.mechanic_id == bot_user.id)
-        .order_by(BikeRepair.picked_up_at.desc())
-        .limit(15),
-    )
-    repairs = list(repairs_result.scalars().all())
+    repairs = await list_repairs_for_mechanic(market_session, mechanic_id=bot_user.id)
 
     if not repairs:
         await callback.message.edit_text(  # type: ignore[union-attr]
@@ -710,31 +710,7 @@ async def rp_my_repairs(
         )
         return
 
-    lines = [f"📋 <b>Ремонты — {bot_user.name}</b>", ""]
-    for rp in repairs:
-        bike_num = rp.bike.bike_number if rp.bike else "—"
-        bike_model = rp.bike.model if rp.bike else ""
-        picked = to_yakutsk(rp.picked_up_at).strftime("%d.%m.%Y %H:%M")
-
-        status_icon = "🔴" if rp.completed_at is None else "🟢"
-        completed = (
-            to_yakutsk(rp.completed_at).strftime("%d.%m.%Y %H:%M")
-            if rp.completed_at
-            else "в работе"
-        )
-
-        cost_str = f"{rp.cost} ₽" if rp.cost else "—"
-
-        lines.append(
-            f"{status_icon} <b>{bike_num}</b> {bike_model}\n"
-            f"   📅 Забрал: {picked}\n"
-            f"   📅 Готов: {completed}\n"
-            f"   💰 {cost_str}"
-            + (f"\n   📝 {rp.work_description}" if rp.work_description else "")
-            + "\n",
-        )
-
     await callback.message.edit_text(  # type: ignore[union-attr]
-        "\n".join(lines),
+        _format_my_repairs_text(repairs, mechanic_name=bot_user.name),
         reply_markup=repair_my_list_kb(repairs),
     )

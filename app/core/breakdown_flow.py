@@ -50,6 +50,20 @@ class CreatedBreakdown:
     bike_status_changed: bool
 
 
+async def list_breakdown_candidate_bikes(
+    session: AsyncSession,
+    *,
+    store_id: int,
+) -> list[Bike]:
+    """Load bikes that can be selected for a new breakdown."""
+    result = await session.execute(
+        select(Bike)
+        .where(Bike.store_id == store_id, Bike.status != BikeStatus.DECOMMISSIONED)
+        .order_by(Bike.bike_number),
+    )
+    return list(result.scalars().all())
+
+
 async def detect_last_usage_courier(
     session: AsyncSession,
     *,
