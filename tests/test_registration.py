@@ -41,7 +41,7 @@ class _FakeExecuteResult:
     def scalar_one_or_none(self) -> object:
         return self._value
 
-    def scalars(self) -> "_FakeScalarsResult":
+    def scalars(self) -> _FakeScalarsResult:
         values = self._value if isinstance(self._value, list) else []
         return _FakeScalarsResult(values)
 
@@ -322,7 +322,15 @@ async def test_admin_save_supervisor_role_persists_store_ids(
     assert state.cleared is True
     assert bot.calls == [999]
     assert bot.edits == [
-        (701, 1002, "✅ <b>Pending User</b> уже одобрен.\n\nРоль: 📋 Супервайзер\nПривязанные склады:\n• Store 10\n• Store 20"),
+        (
+            701,
+            1002,
+            "✅ <b>Pending User</b> уже одобрен.\n\n"
+            "Роль: 📋 Супервайзер\n"
+            "Привязанные склады:\n"
+            "• Store 10\n"
+            "• Store 20",
+        ),
     ]
     assert "Привязанные склады" in callback.message.edits[0][0]
 

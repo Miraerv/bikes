@@ -1,5 +1,3 @@
-# ruff: noqa: S101
-
 from __future__ import annotations
 
 from app.core.store_ids import dump_store_ids, parse_store_id_list, parse_store_id_set
