@@ -14,18 +14,25 @@ All group members are expected to be admins.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
+from html import escape
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.admin_access import get_admin_telegram_ids
 from app.core.config import settings
+from app.core.tz import now_display
 from app.db.base import market_session_maker
 from app.db.models.bike import Bike, BikeStatus
 from app.db.models.bike_alert import AlertType, BikeAlert
 from app.db.models.bike_breakdown import BikeBreakdown
 from app.db.models.bike_repair import BikeRepair
+from app.db.models.bot_user import BotUser, UserRole
+from app.db.models.courier_shift import CourierShift
 from app.db.models.store import Store
 
 if TYPE_CHECKING:
@@ -73,6 +80,266 @@ async def _send_alert(bot: Bot, message: str) -> None:
         logger.info("Alert sent to chat {chat_id}", chat_id=chat_id)
     except Exception:
         logger.exception("Failed to send alert to chat {chat_id}", chat_id=chat_id)
+
+
+async def _send_direct_alert(
+    bot: Bot,
+    telegram_id: int,
+    message: str,
+    *,
+    recipient_kind: str,
+) -> None:
+    """Send an HTML alert directly to a Telegram user."""
+    try:
+        await bot.send_message(chat_id=telegram_id, text=message)
+        logger.info(
+            "Direct alert sent to {kind} {telegram_id}",
+            kind=recipient_kind,
+            telegram_id=telegram_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send direct alert to {kind} {telegram_id}",
+            kind=recipient_kind,
+            telegram_id=telegram_id,
+        )
+
+
+def _parse_store_ids(raw_store_ids: str | None) -> set[int]:
+    """Parse JSON store_ids into integers, ignoring malformed values."""
+    if not raw_store_ids:
+        return set()
+
+    try:
+        parsed = json.loads(raw_store_ids)
+    except (TypeError, ValueError):
+        return set()
+
+    values = parsed if isinstance(parsed, list) else [parsed]
+
+    store_ids: set[int] = set()
+    for value in values:
+        try:
+            store_ids.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return store_ids
+
+
+def _control_ts_for_slot(slot: str) -> datetime:
+    """Return a naive DB-comparable timestamp for today's Yakutsk slot."""
+    hour, minute = (int(part) for part in slot.split(":", maxsplit=1))
+    yakutsk_now = now_display()
+    return yakutsk_now.replace(hour=hour, minute=minute, second=0, microsecond=0).replace(
+        tzinfo=None,
+    )
+
+
+def _shift_covers_store_at_control_time(
+    shift: CourierShift,
+    *,
+    store_id: int,
+    control_ts: datetime,
+) -> bool:
+    """Return True when a courier shift covers a store at the control timestamp."""
+    if shift.status != "online":
+        return False
+    if shift.shift_start > control_ts:
+        return False
+    if shift.shift_end is not None and shift.shift_end <= control_ts:
+        return False
+    return store_id in _parse_store_ids(shift.store_ids)
+
+
+def _find_stores_without_online_courier(
+    stores: list[Store],
+    shifts: list[CourierShift],
+    *,
+    control_ts: datetime,
+) -> list[Store]:
+    """Return stores that have no online courier shift at the control timestamp."""
+    incident_stores: list[Store] = []
+    for store in stores:
+        if any(
+            _shift_covers_store_at_control_time(
+                shift,
+                store_id=store.id,
+                control_ts=control_ts,
+            )
+            for shift in shifts
+        ):
+            continue
+        incident_stores.append(store)
+    return incident_stores
+
+
+def _format_no_online_courier_message(
+    stores: list[Store],
+    *,
+    slot: str,
+    control_ts: datetime,
+) -> str:
+    """Build an aggregated BIKE-121 alert message."""
+    lines = [
+        "<b>Сигнал: нет courier online</b>",
+        f"Слот: <b>{escape(slot)}</b>",
+        f"Дата: <b>{control_ts:%d.%m.%Y}</b>",
+        "",
+        "Store-ы без курьера:",
+    ]
+
+    for store in stores:
+        lines.append(
+            f"- {escape(store.display_name)} (id: {store.id}): "
+            "к контрольному времени нет courier online",
+        )
+
+    return "\n".join(lines)
+
+
+async def _get_express_stores(session: AsyncSession) -> list[Store]:
+    """Return visible express stores."""
+    result = await session.execute(
+        select(Store)
+        .where(
+            Store.main_id == "express",
+            Store.id.notin_(settings.hidden_store_ids),
+        )
+        .order_by(Store.id),
+    )
+    return list(result.scalars().all())
+
+
+async def _get_control_time_courier_shifts(
+    session: AsyncSession,
+    *,
+    control_ts: datetime,
+) -> list[CourierShift]:
+    """Return shifts that can cover stores at the control timestamp."""
+    result = await session.execute(
+        select(CourierShift).where(
+            CourierShift.status == "online",
+            CourierShift.shift_start <= control_ts,
+            or_(
+                CourierShift.shift_end.is_(None),
+                CourierShift.shift_end > control_ts,
+            ),
+        ),
+    )
+    return list(result.scalars().all())
+
+
+def _group_supervisor_incidents(
+    supervisors: list[BotUser],
+    incident_stores: list[Store],
+) -> list[tuple[int, list[Store]]]:
+    """Group incident stores by supervisor store assignment."""
+    stores_by_id = {store.id: store for store in incident_stores}
+    groups: list[tuple[int, list[Store]]] = []
+
+    for supervisor in supervisors:
+        supervisor_store_ids = set(supervisor.assigned_store_ids)
+        if not supervisor_store_ids:
+            continue
+
+        supervisor_stores = [
+            store
+            for store_id, store in stores_by_id.items()
+            if store_id in supervisor_store_ids
+        ]
+        if supervisor_stores:
+            groups.append((supervisor.telegram_id, supervisor_stores))
+
+    return groups
+
+
+async def _get_supervisor_incident_groups(
+    session: AsyncSession,
+    incident_stores: list[Store],
+) -> list[tuple[int, list[Store]]]:
+    """Return affected stores for each configured supervisor."""
+    result = await session.execute(
+        select(BotUser)
+        .where(BotUser.role == UserRole.SUPERVISOR)
+        .order_by(BotUser.id),
+    )
+    supervisors = list(result.scalars().all())
+    return _group_supervisor_incidents(supervisors, incident_stores)
+
+
+async def check_no_online_couriers(
+    bot: Bot,
+    slot: str,
+    *,
+    control_ts: datetime | None = None,
+) -> None:
+    """BIKE-121: alert when express stores have no courier online by slot time."""
+    check_ts = control_ts or _control_ts_for_slot(slot)
+    logger.debug("check_no_online_couriers: running (slot={slot})", slot=slot)
+
+    async with market_session_maker() as session:
+        stores = await _get_express_stores(session)
+        shifts = await _get_control_time_courier_shifts(session, control_ts=check_ts)
+        incident_stores = _find_stores_without_online_courier(
+            stores,
+            shifts,
+            control_ts=check_ts,
+        )
+
+        if not incident_stores:
+            logger.info(
+                "check_no_online_couriers: all stores covered (slot={slot})",
+                slot=slot,
+            )
+            return
+
+        admin_message = _format_no_online_courier_message(
+            incident_stores,
+            slot=slot,
+            control_ts=check_ts,
+        )
+        admin_recipients = await get_admin_telegram_ids(session)
+        for telegram_id in admin_recipients:
+            await _send_direct_alert(
+                bot,
+                telegram_id,
+                admin_message,
+                recipient_kind="admin",
+            )
+
+        try:
+            supervisor_groups = await _get_supervisor_incident_groups(
+                session,
+                incident_stores,
+            )
+        except SQLAlchemyError:
+            logger.exception(
+                "check_no_online_couriers: supervisor routing disabled "
+                "(store_ids may be missing)",
+            )
+            supervisor_groups = []
+
+        for telegram_id, supervisor_stores in supervisor_groups:
+            supervisor_message = _format_no_online_courier_message(
+                supervisor_stores,
+                slot=slot,
+                control_ts=check_ts,
+            )
+            await _send_direct_alert(
+                bot,
+                telegram_id,
+                supervisor_message,
+                recipient_kind="supervisor",
+            )
+
+        logger.info(
+            "check_no_online_couriers: sent slot={slot}, incidents={count}, "
+            "admins={admins}, supervisors={supervisors}",
+            slot=slot,
+            count=len(incident_stores),
+            admins=len(admin_recipients),
+            supervisors=len(supervisor_groups),
+        )
 
 
 # ── BIKE-81: Low bikes on store ────────────────────────────────────────
