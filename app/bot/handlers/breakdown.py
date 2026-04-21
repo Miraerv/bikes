@@ -228,6 +228,10 @@ async def bd_receive_photo(
     data = await state.get_data()
     photo_ids: list[str] = data.get("photo_ids", [])
 
+    if not message.photo:
+        await message.answer("⚠️ Не удалось получить фото. Попробуйте ещё раз.")
+        return
+
     # Take the largest photo size
     photo = message.photo[-1]
     photo_ids.append(photo.file_id)
@@ -235,7 +239,7 @@ async def bd_receive_photo(
 
     # Delete the previous bot message with stale buttons
     old_msg_id = data.get("_bd_photo_msg_id")
-    if old_msg_id:
+    if old_msg_id and message.bot is not None:
         with contextlib.suppress(Exception):
             await message.bot.delete_message(message.chat.id, old_msg_id)
 

@@ -7,8 +7,8 @@ from app.db.models.bike_breakdown import BikeBreakdown, BreakdownType
 from app.db.models.bike_breakdown_photo import BikeBreakdownPhoto
 from app.db.models.bike_repair import BikeRepair
 from app.db.models.bike_usage_log import BikeUsageLog
-from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 from app.db.models.bot_user import BotUser, UserRole
+from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 from app.db.models.courier_shift import CourierShift
 from app.db.models.courier_shift_bike import CourierShiftBike
 from app.db.models.store import Store
@@ -23,8 +23,8 @@ __all__ = [
     "BikeRepair",
     "BikeStatus",
     "BikeUsageLog",
-    "BotUserAdminNotification",
     "BotUser",
+    "BotUserAdminNotification",
     "BreakdownType",
     "CourierShift",
     "CourierShiftBike",

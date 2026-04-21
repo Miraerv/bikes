@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import MarketBase
+
+if TYPE_CHECKING:
+    from app.db.models.admin_user import AdminUser
+    from app.db.models.bike import Bike
+    from app.db.models.bike_breakdown_photo import BikeBreakdownPhoto
+    from app.db.models.bike_repair import BikeRepair
+    from app.db.models.store import Store
 
 
 class BreakdownType(enum.StrEnum):
@@ -54,18 +62,18 @@ class BikeBreakdown(MarketBase):
     )
 
     # — Relationships —
-    bike: Mapped[Bike] = relationship(back_populates="breakdowns", lazy="selectin")  # noqa: F821
-    courier: Mapped[AdminUser] = relationship(  # noqa: F821
+    bike: Mapped[Bike] = relationship(back_populates="breakdowns", lazy="selectin")
+    courier: Mapped[AdminUser] = relationship(
         foreign_keys=[courier_id], lazy="selectin",
     )
-    reporter: Mapped[AdminUser] = relationship(  # noqa: F821
+    reporter: Mapped[AdminUser] = relationship(
         foreign_keys=[reported_by], lazy="selectin",
     )
-    store: Mapped[Store] = relationship(lazy="selectin")  # noqa: F821
-    photos: Mapped[list[BikeBreakdownPhoto]] = relationship(  # noqa: F821
+    store: Mapped[Store] = relationship(lazy="selectin")
+    photos: Mapped[list[BikeBreakdownPhoto]] = relationship(
         back_populates="breakdown", cascade="all, delete-orphan",
     )
-    repairs: Mapped[list[BikeRepair]] = relationship(  # noqa: F821
+    repairs: Mapped[list[BikeRepair]] = relationship(
         back_populates="breakdown",
     )
 

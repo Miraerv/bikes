@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import MarketBase
+
+if TYPE_CHECKING:
+    from app.db.models.bike_breakdown import BikeBreakdown
 
 
 class BikeBreakdownPhoto(MarketBase):
@@ -29,7 +33,7 @@ class BikeBreakdownPhoto(MarketBase):
     )
 
     # — Relationships —
-    breakdown: Mapped[BikeBreakdown] = relationship(  # noqa: F821
+    breakdown: Mapped[BikeBreakdown] = relationship(
         back_populates="photos", lazy="selectin",
     )
 

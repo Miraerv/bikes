@@ -28,14 +28,16 @@ from app.bot.states.bike import RegistrationForm
 from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
 from app.core.store_access import get_accessible_stores
 from app.db.models.admin_user import AdminUser
-from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 from app.db.models.bot_user import ROLE_LABEL, BotUser, UserRole
+from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 
 if TYPE_CHECKING:
     from aiogram import Bot
     from aiogram.fsm.context import FSMContext
     from aiogram.types import CallbackQuery, Message
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models.store import Store
 
 router = Router(name="registration")
 
@@ -112,7 +114,7 @@ def _role_select_kb(user_id: int) -> InlineKeyboardMarkup:
 def _supervisor_store_kb(
     user_id: int,
     selected_store_ids: set[int],
-    stores: list,
+    stores: list[Store],
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
@@ -154,6 +156,18 @@ def _supervisor_store_kb(
 def _normalize_phone(phone: str) -> str:
     """Strip everything except digits from a phone number."""
     return "".join(c for c in phone if c.isdigit())
+
+
+def _phone_lookup_variants(phone_digits: str) -> set[str]:
+    """Return phone variants used to match admin panel records."""
+    variants = {phone_digits}
+    if phone_digits.startswith("7") and len(phone_digits) == 11:
+        variants.add("8" + phone_digits[1:])
+        variants.add("+" + phone_digits)
+    elif phone_digits.startswith("8") and len(phone_digits) == 11:
+        variants.add("7" + phone_digits[1:])
+        variants.add("+7" + phone_digits[1:])
+    return variants
 
 
 async def _notify_other_admins(
@@ -238,6 +252,13 @@ async def reg_contact(
     contact = message.contact
     tg_id = message.from_user.id  # type: ignore[union-attr]
 
+    if contact is None:
+        await message.answer(
+            "⚠️ Пожалуйста, нажмите кнопку <b>«📱 Поделиться номером»</b> ниже.",
+            reply_markup=_share_contact_kb(),
+        )
+        return
+
     # 1. Verify it's the user's OWN contact
     if contact.user_id != tg_id:
         await message.answer(
@@ -258,17 +279,8 @@ async def reg_contact(
         return
 
     # 2. Search boom_admin_users by phone (try multiple formats)
-    phone_variants = set()
-    phone_variants.add(phone_digits)
-    if phone_digits.startswith("7") and len(phone_digits) == 11:
-        phone_variants.add("8" + phone_digits[1:])
-        phone_variants.add("+" + phone_digits)
-    elif phone_digits.startswith("8") and len(phone_digits) == 11:
-        phone_variants.add("7" + phone_digits[1:])
-        phone_variants.add("+7" + phone_digits[1:])
-
     admin_user = None
-    for variant in phone_variants:
+    for variant in _phone_lookup_variants(phone_digits):
         result = await market_session.execute(
             select(AdminUser).where(
                 sql_func.replace(

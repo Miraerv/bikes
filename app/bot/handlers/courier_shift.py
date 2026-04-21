@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from loguru import logger
 from sqlalchemy import select
 
-from app.bot.keyboards.builders import courier_menu_kb
+from app.bot.keyboards.builders import courier_menu_kb, courier_take_confirm_kb
 from app.bot.keyboards.callbacks import (
     CourierBikeSelectCB,
     CourierMenuCB,
@@ -205,23 +205,12 @@ async def take_confirm(
         )
         return
 
-    b = InlineKeyboardBuilder()
-    b.button(
-        text="✅ Подтвердить",
-        callback_data=CourierTakeConfirmCB(bike_id=bike.id, action="save"),
-    )
-    b.button(
-        text="❌ Отмена",
-        callback_data=CourierTakeConfirmCB(bike_id=bike.id, action="cancel"),
-    )
-    b.adjust(2)
-
     await callback.message.edit_text(  # type: ignore[union-attr]
         "📋 <b>Подтвердите взятие байка:</b>\n\n"
         f"🚲 Номер: <b>{bike.bike_number}</b>\n"
         f"🏍 Модель: <b>{bike.model}</b>\n\n"
         "Всё верно?",
-        reply_markup=b.as_markup(),
+        reply_markup=courier_take_confirm_kb(bike.id),
     )
 
 

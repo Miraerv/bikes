@@ -182,6 +182,10 @@ async def take_courier_search(
     market_session: AsyncSession,
 ) -> None:
     """Step 3b: Search couriers by name/surname and show results."""
+    if message.text is None:
+        await message.answer("Введите имя или фамилию курьера:")
+        return
+
     query_text = message.text.strip()
     data = await state.get_data()
 

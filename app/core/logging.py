@@ -1,9 +1,13 @@
 import logging
 import sys
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 
 class _InterceptHandler(logging.Handler):
@@ -17,7 +21,8 @@ class _InterceptHandler(logging.Handler):
             level = record.levelno  # type: ignore[assignment]
 
         # Find caller from where originated the logged message.
-        frame, depth = logging.currentframe(), 2
+        frame: FrameType | None = logging.currentframe()
+        depth = 2
         while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back
             depth += 1

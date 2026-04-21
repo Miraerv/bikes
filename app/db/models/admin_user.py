@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import ClassVar
-
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,7 +10,7 @@ class AdminUser(MarketBase):
     """Read-only model for boom_admin_users (existing table)."""
 
     __tablename__ = "boom_admin_users"
-    __table_args__: ClassVar[dict[str, bool]] = {"extend_existing": True}
+    __table_args__ = {"extend_existing": True}  # noqa: RUF012
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)

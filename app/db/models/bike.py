@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import enum
 from datetime import date, datetime  # noqa: TC003 — SQLAlchemy needs at runtime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import MarketBase
+
+if TYPE_CHECKING:
+    from app.db.models.bike_alert import BikeAlert
+    from app.db.models.bike_breakdown import BikeBreakdown
+    from app.db.models.bike_repair import BikeRepair
+    from app.db.models.bike_usage_log import BikeUsageLog
+    from app.db.models.store import Store
 
 
 class BikeStatus(enum.StrEnum):
@@ -45,17 +53,17 @@ class Bike(MarketBase):
     )
 
     # — Relationships —
-    store: Mapped[Store] = relationship(lazy="selectin")  # noqa: F821
-    usage_logs: Mapped[list[BikeUsageLog]] = relationship(  # noqa: F821
+    store: Mapped[Store] = relationship(lazy="selectin")
+    usage_logs: Mapped[list[BikeUsageLog]] = relationship(
         back_populates="bike", cascade="all, delete-orphan",
     )
-    breakdowns: Mapped[list[BikeBreakdown]] = relationship(  # noqa: F821
+    breakdowns: Mapped[list[BikeBreakdown]] = relationship(
         back_populates="bike", cascade="all, delete-orphan",
     )
-    repairs: Mapped[list[BikeRepair]] = relationship(  # noqa: F821
+    repairs: Mapped[list[BikeRepair]] = relationship(
         back_populates="bike", cascade="all, delete-orphan",
     )
-    alerts: Mapped[list[BikeAlert]] = relationship(  # noqa: F821
+    alerts: Mapped[list[BikeAlert]] = relationship(
         back_populates="bike", cascade="all, delete-orphan",
     )
 

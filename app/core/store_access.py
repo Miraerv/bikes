@@ -10,6 +10,7 @@ from app.db.models.store import Store
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import InstrumentedAttribute
     from sqlalchemy.sql import ColumnElement
     from sqlalchemy.sql.selectable import Select
 
@@ -35,7 +36,7 @@ def has_store_access(bot_user: BotUser | None, store_id: int) -> bool:
 
 def apply_store_scope(
     stmt: Select[Any],
-    store_column: ColumnElement[int],
+    store_column: ColumnElement[int] | InstrumentedAttribute[int],
     bot_user: BotUser | None,
 ) -> Select[Any]:
     """Restrict a SQLAlchemy statement to stores available for the user."""

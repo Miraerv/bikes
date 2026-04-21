@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from aiogram.types import TelegramObject
-    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class DbSessionMiddleware(BaseMiddleware):
@@ -16,7 +16,7 @@ class DbSessionMiddleware(BaseMiddleware):
 
     def __init__(
         self,
-        market_session_pool: async_sessionmaker,
+        market_session_pool: async_sessionmaker[AsyncSession],
     ) -> None:
         super().__init__()
         self.market_session_pool = market_session_pool

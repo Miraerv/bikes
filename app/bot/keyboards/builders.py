@@ -681,12 +681,18 @@ def courier_menu_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def courier_take_confirm_kb() -> InlineKeyboardMarkup:
+def courier_take_confirm_kb(bike_id: int) -> InlineKeyboardMarkup:
     """Confirm / cancel taking a bike (courier)."""
     from app.bot.keyboards.callbacks import CourierTakeConfirmCB
 
     b = InlineKeyboardBuilder()
-    b.button(text="✅ Подтвердить", callback_data=CourierTakeConfirmCB(action="save"))
-    b.button(text="❌ Отмена", callback_data=CourierTakeConfirmCB(action="cancel"))
+    b.button(
+        text="✅ Подтвердить",
+        callback_data=CourierTakeConfirmCB(bike_id=bike_id, action="save"),
+    )
+    b.button(
+        text="❌ Отмена",
+        callback_data=CourierTakeConfirmCB(bike_id=bike_id, action="cancel"),
+    )
     b.adjust(2)
     return b.as_markup()

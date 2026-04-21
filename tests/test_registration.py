@@ -7,8 +7,8 @@ import pytest
 from app.bot.handlers import registration
 from app.bot.keyboards.callbacks import AdminApprovalCB, AdminRoleSelectCB
 from app.db.models.admin_user import AdminUser
-from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 from app.db.models.bot_user import BotUser, UserRole
+from app.db.models.bot_user_admin_notification import BotUserAdminNotification
 
 
 class _FakeState:
@@ -142,6 +142,18 @@ class _FakeContactMessage(_FakeMessage):
         super().__init__()
         self.contact = SimpleNamespace(user_id=500, phone_number="+79991234567")
         self.from_user = SimpleNamespace(id=500, username="new_user")
+
+
+@pytest.mark.parametrize(
+    ("phone_digits", "expected"),
+    [
+        ("79991234567", {"79991234567", "89991234567", "+79991234567"}),
+        ("89991234567", {"89991234567", "79991234567", "+79991234567"}),
+        ("9991234567", {"9991234567"}),
+    ],
+)
+def test_phone_lookup_variants(phone_digits: str, expected: set[str]) -> None:
+    assert registration._phone_lookup_variants(phone_digits) == expected
 
 
 @pytest.mark.asyncio

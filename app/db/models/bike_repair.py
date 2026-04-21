@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
 from decimal import Decimal  # noqa: TC003
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import MarketBase
+
+if TYPE_CHECKING:
+    from app.db.models.bike import Bike
+    from app.db.models.bike_breakdown import BikeBreakdown
+    from app.db.models.store import Store
 
 
 class BikeRepair(MarketBase):
@@ -46,11 +52,11 @@ class BikeRepair(MarketBase):
     )
 
     # — Relationships —
-    bike: Mapped[Bike] = relationship(back_populates="repairs", lazy="selectin")  # noqa: F821
-    breakdown: Mapped[BikeBreakdown | None] = relationship(  # noqa: F821
+    bike: Mapped[Bike] = relationship(back_populates="repairs", lazy="selectin")
+    breakdown: Mapped[BikeBreakdown | None] = relationship(
         back_populates="repairs", lazy="selectin",
     )
-    store: Mapped[Store] = relationship(lazy="selectin")  # noqa: F821
+    store: Mapped[Store] = relationship(lazy="selectin")
 
     def __repr__(self) -> str:
         return (

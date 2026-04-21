@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from aiogram.types import TelegramObject
-    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 # Callback prefixes that don't require approval
@@ -29,7 +29,7 @@ _OPEN_PREFIXES = frozenset({"reg:", "adm_apr:", "adm_role:"})
 class RoleAccessMiddleware(BaseMiddleware):
     """Check user role and inject `bot_user` into handler data."""
 
-    def __init__(self, session_pool: async_sessionmaker) -> None:
+    def __init__(self, session_pool: async_sessionmaker[AsyncSession]) -> None:
         super().__init__()
         self.session_pool = session_pool
 

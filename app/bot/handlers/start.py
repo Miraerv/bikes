@@ -90,7 +90,7 @@ async def cmd_menu(
     # Courier gets simplified menu
     if bot_user.is_courier:
         await message.answer(
-            f"🚚 <b>Меню курьера</b>\n"
+            "🚚 <b>Меню курьера</b>\n"
             "Выберите действие:",
             reply_markup=courier_menu_kb(),
         )
