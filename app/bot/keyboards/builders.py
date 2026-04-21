@@ -41,6 +41,7 @@ from app.bot.keyboards.callbacks import (
     UsageReturnBikeCB,
     UsageReturnConfirmCB,
 )
+from app.core.display import bike_status_badge, bike_status_emoji, breakdown_type_badge
 from app.db.models.bike import BikeStatus
 
 if TYPE_CHECKING:
@@ -52,22 +53,6 @@ if TYPE_CHECKING:
     from app.db.models.bike_repair import BikeRepair
     from app.db.models.bike_usage_log import BikeUsageLog
     from app.db.models.store import Store
-
-# ── Status display helpers ──────────────────────────────────────────────
-
-STATUS_EMOJI: dict[str, str] = {
-    "online": "🟢",
-    "inspection": "🟡",
-    "repair": "🔴",
-    "decommissioned": "⚫",
-}
-
-STATUS_LABEL: dict[str, str] = {
-    "online": "На линии",
-    "inspection": "Проверка",
-    "repair": "Ремонт",
-    "decommissioned": "Списан",
-}
 
 ITEMS_PER_PAGE = 5
 
@@ -126,10 +111,8 @@ def status_filter_kb(store_id: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="📊 Все", callback_data=StatusFilterCB(store_id=store_id, status="all"))
     for status in BikeStatus:
-        emoji = STATUS_EMOJI[status.value]
-        label = STATUS_LABEL[status.value]
         b.button(
-            text=f"{emoji} {label}",
+            text=bike_status_badge(status),
             callback_data=StatusFilterCB(store_id=store_id, status=status.value),
         )
     b.button(text="← Назад", callback_data=BikeMenuCB(action="list"))
@@ -152,9 +135,8 @@ def bike_list_kb(
 
     # Bike buttons
     for bike in bikes:
-        emoji = STATUS_EMOJI.get(bike.status.value, "❓")
         b.button(
-            text=f"{emoji} {bike.bike_number} — {bike.model}",
+            text=f"{bike_status_emoji(bike.status)} {bike.bike_number} — {bike.model}",
             callback_data=BikeCardCB(bike_id=bike.id),
         )
 
@@ -215,10 +197,8 @@ def bike_status_select_kb(bike_id: int) -> InlineKeyboardMarkup:
     """Choose new status for a bike."""
     b = InlineKeyboardBuilder()
     for status in BikeStatus:
-        emoji = STATUS_EMOJI[status.value]
-        label = STATUS_LABEL[status.value]
         b.button(
-            text=f"{emoji} {label}",
+            text=bike_status_badge(status),
             callback_data=BikeStatusCB(bike_id=bike_id, status=status.value),
         )
     b.button(text="← Отмена", callback_data=BikeCardCB(bike_id=bike_id))
@@ -359,26 +339,6 @@ def usage_return_confirm_kb(log_id: int) -> InlineKeyboardMarkup:
 
 # ── Breakdown keyboards (Stage 4) ─────────────────────────────────────
 
-BREAKDOWN_TYPE_EMOJI: dict[str, str] = {
-    "brakes": "🛑",
-    "wheel": "🛞",
-    "battery": "🔋",
-    "motor": "⚙️",
-    "frame": "🪨",
-    "electronics": "💡",
-    "other": "❓",
-}
-
-BREAKDOWN_TYPE_LABEL: dict[str, str] = {
-    "brakes": "Тормоза",
-    "wheel": "Колесо",
-    "battery": "Аккумулятор",
-    "motor": "Двигатель",
-    "frame": "Рама",
-    "electronics": "Электроника",
-    "other": "Другое",
-}
-
 
 def breakdown_menu_kb() -> InlineKeyboardMarkup:
     """Sub-menu: create breakdown / back."""
@@ -395,9 +355,8 @@ def breakdown_bike_select_kb(
     """List of bikes at the store (exclude decommissioned)."""
     b = InlineKeyboardBuilder()
     for bike in bikes:
-        emoji = STATUS_EMOJI.get(bike.status.value, "❓")
         b.button(
-            text=f"{emoji} {bike.bike_number} — {bike.model}",
+            text=f"{bike_status_emoji(bike.status)} {bike.bike_number} — {bike.model}",
             callback_data=BreakdownBikeSelectCB(bike_id=bike.id, store_id=store_id),
         )
     b.button(text="← Отмена", callback_data=BreakdownMenuCB(action="open"))
@@ -412,10 +371,8 @@ def breakdown_type_kb() -> InlineKeyboardMarkup:
 
     b = InlineKeyboardBuilder()
     for bd_type in BreakdownType:
-        emoji = BREAKDOWN_TYPE_EMOJI.get(bd_type.value, "❓")
-        label = BREAKDOWN_TYPE_LABEL.get(bd_type.value, bd_type.value)
         b.button(
-            text=f"{emoji} {label}",
+            text=breakdown_type_badge(bd_type),
             callback_data=BreakdownTypeCB(bd_type=bd_type.value),
         )
     b.button(text="← Отмена", callback_data=BreakdownMenuCB(action="open"))
@@ -466,12 +423,10 @@ def breakdown_history_kb(
 
     b = InlineKeyboardBuilder()
     for bd in breakdowns:
-        bd_emoji = BREAKDOWN_TYPE_EMOJI.get(bd.breakdown_type.value, "❓")
-        bd_label = BREAKDOWN_TYPE_LABEL.get(bd.breakdown_type.value, bd.breakdown_type.value)
         reported = bd.reported_at.strftime("%d.%m") if bd.reported_at else "—"
         photo_icon = "📷" if bd.photos else ""
         b.button(
-            text=f"{bd_emoji} {bd_label} ({reported}) {photo_icon}",
+            text=f"{breakdown_type_badge(bd.breakdown_type)} ({reported}) {photo_icon}",
             callback_data=BreakdownDetailCB(breakdown_id=bd.id, bike_id=bike_id),
         )
     b.button(text="← Назад", callback_data=BikeCardCB(bike_id=bike_id))
@@ -522,9 +477,8 @@ def repair_bike_select_kb(
     """List of bikes available for repair pickup (inspection/repair status)."""
     b = InlineKeyboardBuilder()
     for bike in bikes:
-        emoji = STATUS_EMOJI.get(bike.status.value, "❓")
         b.button(
-            text=f"{emoji} {bike.bike_number} — {bike.model}",
+            text=f"{bike_status_emoji(bike.status)} {bike.bike_number} — {bike.model}",
             callback_data=RepairBikeSelectCB(bike_id=bike.id, store_id=store_id),
         )
     b.button(text="← Отмена", callback_data=RepairMenuCB(action="open"))
@@ -539,11 +493,9 @@ def repair_breakdown_select_kb(
     """List of open breakdowns for linking to a repair + skip button."""
     b = InlineKeyboardBuilder()
     for bd in breakdowns:
-        bd_emoji = BREAKDOWN_TYPE_EMOJI.get(bd.breakdown_type.value, "❓")
-        bd_label = BREAKDOWN_TYPE_LABEL.get(bd.breakdown_type.value, bd.breakdown_type.value)
         reported = bd.reported_at.strftime("%d.%m")
         b.button(
-            text=f"{bd_emoji} {bd_label} ({reported})",
+            text=f"{breakdown_type_badge(bd.breakdown_type)} ({reported})",
             callback_data=RepairBreakdownSelectCB(breakdown_id=bd.id),
         )
     b.button(text="⏭ Без привязки", callback_data=RepairBreakdownSkipCB(action="skip"))

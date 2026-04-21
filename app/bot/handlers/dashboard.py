@@ -9,13 +9,12 @@ from aiogram import F, Router
 from sqlalchemy import func, select
 
 from app.bot.keyboards.builders import (
-    STATUS_EMOJI,
-    STATUS_LABEL,
     dashboard_back_kb,
     dashboard_stores_kb,
     main_menu_kb,
 )
 from app.bot.keyboards.callbacks import DashboardMenuCB, DashboardStoreCB
+from app.core.display import bike_status_badge
 from app.core.store_access import apply_store_scope, get_accessible_stores, guard_store_access
 from app.db.models.bike import Bike, BikeStatus
 from app.db.models.bike_repair import BikeRepair
@@ -85,10 +84,8 @@ def _format_overall(counts: dict[str, int]) -> str:
         f"Всего: <b>{total}</b>",
     ]
     for status in BikeStatus:
-        emoji = STATUS_EMOJI[status.value]
-        label = STATUS_LABEL[status.value]
         cnt = counts.get(status.value, 0)
-        lines.append(f"{emoji} {label}: <b>{cnt}</b>")
+        lines.append(f"{bike_status_badge(status)}: <b>{cnt}</b>")
     lines.append("\n<i>Выберите склад для детализации:</i>")
     return "\n".join(lines)
 
@@ -106,10 +103,8 @@ def _format_store_detail(
         f"Байки: <b>{total}</b>",
     ]
     for status in BikeStatus:
-        emoji = STATUS_EMOJI[status.value]
-        label = STATUS_LABEL[status.value]
         cnt = counts.get(status.value, 0)
-        lines.append(f"{emoji} {label}: <b>{cnt}</b>")
+        lines.append(f"{bike_status_badge(status)}: <b>{cnt}</b>")
 
     lines.append("")
     lines.append(f"👤 Активных смен: <b>{active_shifts}</b>")

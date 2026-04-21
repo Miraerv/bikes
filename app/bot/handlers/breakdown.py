@@ -11,8 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.bot.keyboards.builders import (
-    BREAKDOWN_TYPE_EMOJI,
-    BREAKDOWN_TYPE_LABEL,
     breakdown_bike_select_kb,
     breakdown_confirm_kb,
     breakdown_courier_select_kb,
@@ -43,6 +41,7 @@ from app.core.breakdown_flow import (
     detect_last_usage_courier,
     save_breakdown,
 )
+from app.core.display import breakdown_type_emoji, breakdown_type_label
 from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.admin_user import AdminUser
@@ -364,8 +363,8 @@ async def _show_bd_confirm(
     confirmation = await build_breakdown_confirmation(market_session, draft)
 
     bd_type = draft.breakdown_type
-    bd_emoji = BREAKDOWN_TYPE_EMOJI.get(bd_type, "❓")
-    bd_label = BREAKDOWN_TYPE_LABEL.get(bd_type, bd_type)
+    bd_emoji = breakdown_type_emoji(bd_type)
+    bd_label = breakdown_type_label(bd_type)
 
     await state.update_data(
         bike_label=confirmation.bike_label,
@@ -422,7 +421,7 @@ async def bd_save(
     await callback.message.edit_text(  # type: ignore[union-attr]
         "✅ Поломка зафиксирована!\n\n"
         f"🚲 {data['bike_label']}\n"
-        f"⚠️ {BREAKDOWN_TYPE_LABEL.get(draft.breakdown_type, draft.breakdown_type)}\n"
+        f"⚠️ {breakdown_type_label(draft.breakdown_type)}\n"
         f"📷 Фото: {len(draft.photo_ids)} шт.\n"
         f"👤 Курьер: {draft.courier_name}",
         reply_markup=breakdown_menu_kb(),
@@ -525,8 +524,6 @@ async def breakdown_detail(
         )
         return
 
-    bd_emoji = BREAKDOWN_TYPE_EMOJI.get(bd.breakdown_type.value, "❓")
-    bd_label = BREAKDOWN_TYPE_LABEL.get(bd.breakdown_type.value, bd.breakdown_type.value)
     courier_name = bd.courier.display_name if bd.courier else "—"
     reporter_name = bd.reporter.display_name if bd.reporter else "—"
     reported = to_yakutsk(bd.reported_at).strftime("%d.%m.%Y %H:%M")
@@ -534,7 +531,8 @@ async def breakdown_detail(
     photo_count = len(bd.photos) if bd.photos else 0
 
     text = (
-        f"{bd_emoji} <b>{bd_label}</b>\n\n"
+        f"{breakdown_type_emoji(bd.breakdown_type)} "
+        f"<b>{breakdown_type_label(bd.breakdown_type)}</b>\n\n"
         f"🚲 Байк: <b>#{bike_num}</b>\n"
         f"👤 Курьер: <b>{courier_name}</b>\n"
         f"📋 Зафиксировал: <b>{reporter_name}</b>\n"
@@ -551,6 +549,9 @@ async def breakdown_detail(
 
     # Send photos as separate messages
     chat_id = callback.message.chat.id  # type: ignore[union-attr]
-    caption = f"{bd_emoji} {bd_label} — байк #{bike_num}"
+    caption = (
+        f"{breakdown_type_emoji(bd.breakdown_type)} "
+        f"{breakdown_type_label(bd.breakdown_type)} — байк #{bike_num}"
+    )
     for photo in bd.photos or []:
         await bot.send_photo(chat_id, photo.photo_url, caption=caption)

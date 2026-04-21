@@ -9,6 +9,8 @@ from app.core.breakdown_flow import BreakdownDraft, create_breakdown
 from app.core.display import (
     MISSING_LABEL,
     bike_label,
+    bike_status_badge,
+    breakdown_type_badge,
     display_name_label,
     optional_minutes_label,
     optional_money_label,
@@ -107,11 +109,9 @@ def test_format_pickup_breakdown_label_uses_intermediate_result() -> None:
         breakdown_reported_at=datetime(2026, 4, 21, 10, 0),
     )
 
-    assert format_pickup_breakdown_label(
-        confirmation,
-        {"brakes": "Тормоза"},
-        {"brakes": "B"},
-    ) == "B Тормоза (21.04.2026)"
+    assert format_pickup_breakdown_label(confirmation) == "🛑 Тормоза (21.04.2026)"
+    assert bike_status_badge("online") == "🟢 На линии"
+    assert breakdown_type_badge(BreakdownType.BRAKES) == "🛑 Тормоза"
 
 
 def test_create_usage_log_from_draft() -> None:

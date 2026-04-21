@@ -10,13 +10,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from app.bot.keyboards.builders import (
-    BREAKDOWN_TYPE_EMOJI,
-    BREAKDOWN_TYPE_LABEL,
     analytics_back_kb,
     analytics_menu_kb,
     main_menu_kb,
 )
 from app.bot.keyboards.callbacks import AnalyticsMenuCB
+from app.core.display import breakdown_type_badge
 from app.core.store_access import apply_store_scope
 from app.db.models.admin_user import AdminUser
 from app.db.models.bike import Bike
@@ -127,9 +126,7 @@ async def report_breakdowns_month(
     if type_rows:
         lines.append("<b>По типам:</b>")
         for bd_type, cnt in type_rows:
-            emoji = BREAKDOWN_TYPE_EMOJI.get(bd_type.value, "❓")
-            label = BREAKDOWN_TYPE_LABEL.get(bd_type.value, bd_type.value)
-            lines.append(f"  {emoji} {label}: <b>{cnt}</b>")
+            lines.append(f"  {breakdown_type_badge(bd_type)}: <b>{cnt}</b>")
 
     if total == 0:
         lines.append("\n<i>Поломок не зафиксировано 🎉</i>")

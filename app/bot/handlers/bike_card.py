@@ -9,12 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.bot.keyboards.builders import (
-    STATUS_EMOJI,
-    STATUS_LABEL,
     bike_card_actions_kb,
     bike_menu_kb,
 )
 from app.bot.keyboards.callbacks import BikeCardCB
+from app.core.display import bike_status_emoji, bike_status_label
 from app.core.store_access import has_store_access
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike
@@ -60,8 +59,8 @@ async def show_bike_card(
         return
 
     # Status info
-    emoji = STATUS_EMOJI.get(bike.status.value, "❓")
-    label = STATUS_LABEL.get(bike.status.value, bike.status.value)
+    emoji = bike_status_emoji(bike.status)
+    label = bike_status_label(bike.status)
     store_name = bike.store.display_name if bike.store else "—"
 
     # Last 3 usage logs

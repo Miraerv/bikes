@@ -11,17 +11,16 @@ from loguru import logger
 from sqlalchemy import select
 
 from app.bot.keyboards.builders import (
-    STATUS_EMOJI,
-    STATUS_LABEL,
     add_bike_confirm_kb,
     bike_menu_kb,
     store_select_kb,
 )
 from app.bot.keyboards.callbacks import AddBikeConfirmCB, BikeMenuCB, StoreSelectCB
 from app.bot.states.bike import AddBikeForm
+from app.core.display import bike_status_badge
 from app.core.store_access import get_accessible_stores, guard_store_access
 from app.core.tz import now_display
-from app.db.models.bike import Bike
+from app.db.models.bike import Bike, BikeStatus
 from app.db.models.store import Store
 
 if TYPE_CHECKING:
@@ -187,7 +186,7 @@ async def process_date(message: Message, state: FSMContext) -> None:
         f"🏍 Модель: <b>{data['model']}</b>\n"
         f"🏪 Склад: <b>{data['store_name']}</b>\n"
         f"📅 Дата: <b>{raw}</b>\n"
-        f"📊 Статус: {STATUS_EMOJI['online']} {STATUS_LABEL['online']}\n\n"
+        f"📊 Статус: {bike_status_badge(BikeStatus.ONLINE)}\n\n"
         "Всё верно?",
         reply_markup=add_bike_confirm_kb(),
     )
@@ -229,7 +228,7 @@ async def confirm_add_bike(
         f"✅ Байк <b>{data['bike_number']}</b> успешно добавлен!\n\n"
         f"🏍 {data['model']}\n"
         f"🏪 {data['store_name']}\n"
-        f"📊 {STATUS_EMOJI['online']} На линии",
+        f"📊 {bike_status_badge(BikeStatus.ONLINE)}",
         reply_markup=bike_menu_kb(),
     )
 

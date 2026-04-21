@@ -11,8 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.bot.keyboards.builders import (
-    BREAKDOWN_TYPE_EMOJI,
-    BREAKDOWN_TYPE_LABEL,
     main_menu_kb,
     repair_active_list_kb,
     repair_bike_select_kb,
@@ -335,11 +333,7 @@ async def _show_pickup_confirm(
     draft = _pickup_draft_from_state(data)
     confirmation = await build_pickup_confirmation(market_session, draft)
 
-    breakdown_label = format_pickup_breakdown_label(
-        confirmation,
-        BREAKDOWN_TYPE_LABEL,
-        BREAKDOWN_TYPE_EMOJI,
-    )
+    breakdown_label = format_pickup_breakdown_label(confirmation)
 
     await state.update_data(
         bike_label=confirmation.bike_label,

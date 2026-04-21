@@ -9,12 +9,11 @@ from loguru import logger
 from sqlalchemy import select
 
 from app.bot.keyboards.builders import (
-    STATUS_EMOJI,
-    STATUS_LABEL,
     bike_card_kb,
     bike_status_select_kb,
 )
 from app.bot.keyboards.callbacks import BikeStatusCB
+from app.core.display import bike_status_badge
 from app.core.store_access import has_store_access
 from app.db.models.bike import Bike, BikeStatus
 
@@ -67,11 +66,6 @@ async def set_bike_status(
     old_status = bike.status
     bike.status = new_status
 
-    old_emoji = STATUS_EMOJI.get(old_status.value, "❓")
-    old_label = STATUS_LABEL.get(old_status.value, old_status.value)
-    new_emoji = STATUS_EMOJI.get(new_status.value, "❓")
-    new_label = STATUS_LABEL.get(new_status.value, new_status.value)
-
     logger.info(
         "Bike {number} status changed: {old} → {new}",
         number=bike.bike_number,
@@ -81,6 +75,6 @@ async def set_bike_status(
 
     await callback.message.edit_text(  # type: ignore[union-attr]
         f"✅ Статус байка <b>{bike.bike_number}</b> изменён\n\n"
-        f"{old_emoji} {old_label} → {new_emoji} {new_label}",
+        f"{bike_status_badge(old_status)} → {bike_status_badge(new_status)}",
         reply_markup=bike_card_kb(bike.id),
     )

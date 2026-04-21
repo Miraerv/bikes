@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.display import (
     MISSING_LABEL,
     bike_label,
+    breakdown_type_badge,
     display_name_label,
     optional_minutes_label,
     optional_money_label,
@@ -253,20 +254,14 @@ async def save_repair_completion(
     )
 
 
-def format_pickup_breakdown_label(
-    confirmation: RepairPickupConfirmation,
-    type_labels: dict[str, str],
-    type_emojis: dict[str, str],
-) -> str:
+def format_pickup_breakdown_label(confirmation: RepairPickupConfirmation) -> str:
     if confirmation.breakdown_type is None:
         return f"{MISSING_LABEL} (без привязки)"
 
     bd_type = confirmation.breakdown_type
-    bd_emoji = type_emojis.get(bd_type, "❓")
-    bd_type_label = type_labels.get(bd_type, bd_type)
     reported = (
         to_yakutsk(confirmation.breakdown_reported_at).strftime("%d.%m.%Y")
         if confirmation.breakdown_reported_at
         else MISSING_LABEL
     )
-    return f"{bd_emoji} {bd_type_label} ({reported})"
+    return f"{breakdown_type_badge(bd_type)} ({reported})"
