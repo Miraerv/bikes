@@ -1,3 +1,5 @@
+# ruff: noqa: S101
+
 from __future__ import annotations
 
 import pytest
@@ -6,7 +8,7 @@ from app import internal_api
 
 
 class _FakeSession:
-    async def __aenter__(self) -> "_FakeSession":
+    async def __aenter__(self) -> _FakeSession:
         return self
 
     async def __aexit__(
@@ -21,9 +23,11 @@ class _FakeSession:
 class _FakeBot:
     def __init__(self) -> None:
         self.calls: list[int] = []
+        self.messages: list[str] = []
 
     async def send_message(self, chat_id: int, text: str) -> None:
         self.calls.append(chat_id)
+        self.messages.append(text)
         if chat_id == 100:
             raise RuntimeError("boom")
 
@@ -49,8 +53,8 @@ async def test_handle_shift_ended_notifies_all_admins_even_if_one_fails(
     async def fake_get_shift_stats(
         _shift_id: int,
         _admin_user_id: int,
-    ) -> tuple[str, int, float | None]:
-        return "Courier Name", 5, 95.0
+    ) -> internal_api.ShiftStats:
+        return internal_api.ShiftStats(courier_name="Courier Name", total_orders=5, sla=95.0)
 
     async def fake_get_admin_telegram_ids(_session: object) -> list[int]:
         return [100, 200, 300]

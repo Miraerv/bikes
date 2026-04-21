@@ -6,6 +6,7 @@ Endpoint: POST /api/signal
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from aiohttp import web
@@ -66,6 +67,13 @@ _MAX_DELIVERY_MINUTES_BY_LAYER = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class ShiftStats:
+    courier_name: str
+    total_orders: int
+    sla: float | None
+
+
 def _get_sla_emoji(sla: float) -> str:
     if sla >= 95:
         return "🟢"
@@ -79,20 +87,42 @@ def _is_order_within_sla(layer: int, minutes: int) -> bool:
     return max_minutes is not None and minutes <= max_minutes
 
 
+def _order_row_is_within_sla(full_time: int | None, layer: int | None) -> bool:
+    normalized_layer = int(layer) if layer is not None else 0
+    minutes = full_time or 0
+    return _is_order_within_sla(normalized_layer, minutes)
+
+
+def _format_shift_ended_message(shift_id: int | None, stats: ShiftStats) -> str:
+    msg = (
+        f"🔔 <b>Смена завершена</b>\n\n"
+        f"📋 Смена: <b>#{shift_id}</b>\n"
+        f"👤 Курьер: <b>{stats.courier_name}</b>\n\n"
+        f"<b>Итоги смены:</b>\n"
+        f"📦 Заказов: <b>{stats.total_orders}</b>\n"
+    )
+    if stats.sla is not None:
+        return f"{msg}📊 SLA: <b>{stats.sla:.1f}%</b> {_get_sla_emoji(stats.sla)}"
+    return f"{msg}📊 SLA: <b>—</b>"
+
+
 async def _get_shift_stats(
     shift_id: int | None,
     admin_user_id: int,
-) -> tuple[str, int, float | None]:
-    """Return (courier_name, total_orders, sla%) for a finished shift."""
+) -> ShiftStats:
+    """Return courier stats for a finished shift."""
     async with market_session_maker() as session:
         # courier name
         admin = await session.get(AdminUser, admin_user_id)
         name = f"{admin.name} {admin.surname or ''}".strip() if admin else str(admin_user_id)
 
         # shift timestamps
+        if shift_id is None:
+            return ShiftStats(courier_name=name, total_orders=0, sla=None)
+
         shift = await session.get(CourierShift, shift_id)
         if not shift or not shift.shift_end:
-            return name, 0, None
+            return ShiftStats(courier_name=name, total_orders=0, sla=None)
 
         # orders for this courier during shift
         rows = (
@@ -107,19 +137,17 @@ async def _get_shift_stats(
         ).all()
 
         if not rows:
-            return name, 0, None
+            return ShiftStats(courier_name=name, total_orders=0, sla=None)
 
-        total = 0
-        good = 0
-        for full_time, layer in rows:
-            layer = int(layer) if layer is not None else 0
-            minutes = full_time or 0
-            total += 1
-            if _is_order_within_sla(layer, minutes):
-                good += 1
-
-        sla = (good / total * 100) if total else None
-        return name, total, sla
+        total_orders = len(rows)
+        good_orders = sum(
+            1 for full_time, layer in rows if _order_row_is_within_sla(full_time, layer)
+        )
+        return ShiftStats(
+            courier_name=name,
+            total_orders=total_orders,
+            sla=good_orders / total_orders * 100,
+        )
 
 
 async def _handle_shift_ended(bot: Bot, payload: dict[str, object]) -> None:
@@ -131,19 +159,8 @@ async def _handle_shift_ended(bot: Bot, payload: dict[str, object]) -> None:
         logger.warning("shift_ended signal missing admin_user_id")
         return
 
-    name, total_orders, sla = await _get_shift_stats(shift_id, admin_user_id)
-
-    msg = (
-        f"🔔 <b>Смена завершена</b>\n\n"
-        f"📋 Смена: <b>#{shift_id}</b>\n"
-        f"👤 Курьер: <b>{name}</b>\n\n"
-        f"<b>Итоги смены:</b>\n"
-        f"📦 Заказов: <b>{total_orders}</b>\n"
-    )
-    if sla is not None:
-        msg += f"📊 SLA: <b>{sla:.1f}%</b> {_get_sla_emoji(sla)}"
-    else:
-        msg += "📊 SLA: <b>—</b>"
+    stats = await _get_shift_stats(shift_id, admin_user_id)
+    msg = _format_shift_ended_message(shift_id, stats)
 
     # TODO: добавить курьера и супервайзеров после тестирования
     async with market_session_maker() as session:
@@ -191,7 +208,8 @@ def create_api_app(bot: Bot) -> web.Application:
         handler = SIGNAL_HANDLERS.get(signal)
         if not handler:
             return web.json_response(
-                {"error": f"unknown signal: {signal}"}, status=400,
+                {"error": f"unknown signal: {signal}"},
+                status=400,
             )
 
         try:

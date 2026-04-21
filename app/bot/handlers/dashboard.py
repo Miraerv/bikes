@@ -93,6 +93,30 @@ def _format_overall(counts: dict[str, int]) -> str:
     return "\n".join(lines)
 
 
+def _format_store_detail(
+    store_name: str,
+    counts: dict[str, int],
+    active_shifts: int,
+    active_repairs: int,
+) -> str:
+    """Format per-store bike stats and active work counters."""
+    total = sum(counts.values())
+    lines = [
+        f"🏪 <b>Склад: {store_name}</b>\n",
+        f"Байки: <b>{total}</b>",
+    ]
+    for status in BikeStatus:
+        emoji = STATUS_EMOJI[status.value]
+        label = STATUS_LABEL[status.value]
+        cnt = counts.get(status.value, 0)
+        lines.append(f"{emoji} {label}: <b>{cnt}</b>")
+
+    lines.append("")
+    lines.append(f"👤 Активных смен: <b>{active_shifts}</b>")
+    lines.append(f"🔧 В ремонте сейчас: <b>{active_repairs}</b>")
+    return "\n".join(lines)
+
+
 @router.callback_query(DashboardMenuCB.filter(F.action == "open"))
 async def open_dashboard(
     callback: CallbackQuery,
@@ -147,7 +171,6 @@ async def store_detail(
 
     # Bike counts by status
     counts = await _get_status_counts(market_session, store_id=store_id, bot_user=bot_user)
-    total = sum(counts.values())
 
     # Active shifts (ended_at IS NULL)
     active_shifts_result = await market_session.execute(
@@ -167,22 +190,7 @@ async def store_detail(
     )
     active_repairs = active_repairs_result.scalar() or 0
 
-    # Format text
-    lines = [
-        f"🏪 <b>Склад: {store_name}</b>\n",
-        f"Байки: <b>{total}</b>",
-    ]
-    for status in BikeStatus:
-        emoji = STATUS_EMOJI[status.value]
-        label = STATUS_LABEL[status.value]
-        cnt = counts.get(status.value, 0)
-        lines.append(f"{emoji} {label}: <b>{cnt}</b>")
-
-    lines.append("")
-    lines.append(f"👤 Активных смен: <b>{active_shifts}</b>")
-    lines.append(f"🔧 В ремонте сейчас: <b>{active_repairs}</b>")
-
     await callback.message.edit_text(  # type: ignore[union-attr]
-        "\n".join(lines),
+        _format_store_detail(store_name, counts, active_shifts, active_repairs),
         reply_markup=dashboard_back_kb(),
     )
