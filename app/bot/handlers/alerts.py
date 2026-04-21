@@ -135,6 +135,19 @@ def _control_ts_for_slot(slot: str) -> datetime:
     )
 
 
+def _shift_is_online_at_control_time(
+    shift: CourierShift,
+    *,
+    control_ts: datetime,
+) -> bool:
+    """Return True when a courier shift is online at the control timestamp."""
+    return (
+        shift.status == "online"
+        and shift.shift_start <= control_ts
+        and (shift.shift_end is None or shift.shift_end > control_ts)
+    )
+
+
 def _shift_covers_store_at_control_time(
     shift: CourierShift,
     *,
@@ -142,11 +155,7 @@ def _shift_covers_store_at_control_time(
     control_ts: datetime,
 ) -> bool:
     """Return True when a courier shift covers a store at the control timestamp."""
-    if shift.status != "online":
-        return False
-    if shift.shift_start > control_ts:
-        return False
-    if shift.shift_end is not None and shift.shift_end <= control_ts:
+    if not _shift_is_online_at_control_time(shift, control_ts=control_ts):
         return False
     return store_id in _parse_store_ids(shift.store_ids)
 
