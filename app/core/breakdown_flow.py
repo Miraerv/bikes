@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.display import bike_label, display_name_label, optional_text_label
 from app.db.models.bike import Bike, BikeStatus
 from app.db.models.bike_breakdown import BikeBreakdown, BreakdownType
 from app.db.models.bike_breakdown_photo import BikeBreakdownPhoto
@@ -68,7 +69,7 @@ async def detect_last_usage_courier(
 
     return BreakdownCourier(
         courier_id=last_log.courier_id,
-        courier_name=last_log.courier.display_name if last_log.courier else "—",
+        courier_name=display_name_label(last_log.courier),
     )
 
 
@@ -83,14 +84,11 @@ async def build_breakdown_confirmation(
     )
     store = store_result.scalar_one_or_none()
 
-    bike_label = f"{bike.bike_number} — {bike.model}" if bike else "—"
-    store_label = store.display_name if store else "—"
-
     return BreakdownConfirmation(
         draft=draft,
-        bike_label=bike_label,
-        store_label=store_label,
-        description_label=draft.description or "—",
+        bike_label=bike_label(bike),
+        store_label=display_name_label(store),
+        description_label=optional_text_label(draft.description),
         photo_count=len(draft.photo_ids),
     )
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.display import MISSING_LABEL, bike_label, display_name_label
 from app.core.store_access import apply_store_scope
 from app.core.tz import to_yakutsk
 from app.db.models.admin_user import AdminUser
@@ -50,12 +51,6 @@ class UsageShiftSummary:
         return f"{self.bike_number} — {self.bike_model}" if self.bike_model else self.bike_number
 
 
-def _bike_label(bike: Bike | None) -> str:
-    if bike is None:
-        return "—"
-    return f"{bike.bike_number} — {bike.model}"
-
-
 async def build_take_bike_confirmation(
     session: AsyncSession,
     draft: TakeBikeDraft,
@@ -75,9 +70,9 @@ async def build_take_bike_confirmation(
 
     return TakeBikeConfirmation(
         draft=draft,
-        bike_label=_bike_label(bike),
-        courier_label=courier.display_name if courier else "—",
-        store_label=store.display_name if store else "—",
+        bike_label=bike_label(bike),
+        courier_label=display_name_label(courier),
+        store_label=display_name_label(store),
     )
 
 
@@ -102,10 +97,10 @@ def usage_shift_summary(log: BikeUsageLog) -> UsageShiftSummary:
 
     return UsageShiftSummary(
         log_id=log.id,
-        bike_number=bike.bike_number if bike else "—",
+        bike_number=bike.bike_number if bike else MISSING_LABEL,
         bike_model=bike.model if bike else "",
-        courier_name=courier.display_name if courier else "—",
-        store_name=store.display_name if store else "—",
+        courier_name=display_name_label(courier),
+        store_name=display_name_label(store),
         started_at=log.started_at,
         ended_at=log.ended_at,
     )

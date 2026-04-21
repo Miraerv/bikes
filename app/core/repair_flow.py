@@ -8,6 +8,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.display import (
+    MISSING_LABEL,
+    bike_label,
+    display_name_label,
+    optional_minutes_label,
+    optional_money_label,
+    optional_text_label,
+)
 from app.core.store_access import apply_store_scope
 from app.core.tz import to_yakutsk
 from app.db.models.bike import Bike, BikeStatus
@@ -138,9 +146,9 @@ async def build_pickup_confirmation(
 
     return RepairPickupConfirmation(
         draft=draft,
-        bike_label=f"{bike.bike_number} — {bike.model}" if bike else "—",
-        store_label=store.display_name if store else "—",
-        mechanic_name=draft.mechanic_name or "—",
+        bike_label=bike_label(bike),
+        store_label=display_name_label(store),
+        mechanic_name=optional_text_label(draft.mechanic_name),
         breakdown_type=breakdown_type,
         breakdown_reported_at=breakdown_reported_at,
     )
@@ -202,11 +210,11 @@ async def build_completion_confirmation(
 
     return RepairCompletionConfirmation(
         draft=draft,
-        bike_label=f"{bike.bike_number} — {bike.model}" if bike else "—",
-        mechanic_name=repair.mechanic_name or "—",
-        work_description_label=draft.work_description or "—",
-        duration_label=f"{duration} мин." if duration else "—",
-        cost_label=f"{cost} ₽" if cost else "—",
+        bike_label=bike_label(bike),
+        mechanic_name=optional_text_label(repair.mechanic_name),
+        work_description_label=optional_text_label(draft.work_description),
+        duration_label=optional_minutes_label(duration),
+        cost_label=optional_money_label(cost),
     )
 
 
@@ -251,7 +259,7 @@ def format_pickup_breakdown_label(
     type_emojis: dict[str, str],
 ) -> str:
     if confirmation.breakdown_type is None:
-        return "— (без привязки)"
+        return f"{MISSING_LABEL} (без привязки)"
 
     bd_type = confirmation.breakdown_type
     bd_emoji = type_emojis.get(bd_type, "❓")
@@ -259,6 +267,6 @@ def format_pickup_breakdown_label(
     reported = (
         to_yakutsk(confirmation.breakdown_reported_at).strftime("%d.%m.%Y")
         if confirmation.breakdown_reported_at
-        else "—"
+        else MISSING_LABEL
     )
     return f"{bd_emoji} {bd_type_label} ({reported})"

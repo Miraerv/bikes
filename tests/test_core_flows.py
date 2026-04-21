@@ -6,6 +6,14 @@ from decimal import Decimal
 import pytest
 
 from app.core.breakdown_flow import BreakdownDraft, create_breakdown
+from app.core.display import (
+    MISSING_LABEL,
+    bike_label,
+    display_name_label,
+    optional_minutes_label,
+    optional_money_label,
+    optional_text_label,
+)
 from app.core.registration_flow import (
     admin_user_registration_name,
     assign_role,
@@ -25,8 +33,10 @@ from app.core.usage_flow import (
     format_active_shift_lines,
 )
 from app.db.models.admin_user import AdminUser
+from app.db.models.bike import Bike
 from app.db.models.bike_breakdown import BreakdownType
 from app.db.models.bot_user import BotUser, UserRole
+from app.db.models.store import Store
 
 
 @pytest.mark.parametrize(
@@ -63,6 +73,22 @@ def test_parse_repair_duration_errors(raw_text: str, error: str) -> None:
 )
 def test_parse_repair_cost(raw_text: str, expected: Decimal | None) -> None:
     assert parse_repair_cost(raw_text) == expected
+
+
+def test_display_labels_handle_missing_values() -> None:
+    bike = Bike(bike_number="B-1", model="Model X", commissioned_at=datetime(2026, 4, 21))
+    store = Store(title="Store title", street="Store street")
+
+    assert bike_label(bike) == "B-1 — Model X"
+    assert bike_label(None) == MISSING_LABEL
+    assert display_name_label(store) == "Store street"
+    assert display_name_label(None) == MISSING_LABEL
+    assert optional_text_label("Text") == "Text"
+    assert optional_text_label(None) == MISSING_LABEL
+    assert optional_minutes_label(30) == "30 мин."
+    assert optional_minutes_label(None) == MISSING_LABEL
+    assert optional_money_label(Decimal("10.50")) == "10.50 ₽"
+    assert optional_money_label(None) == MISSING_LABEL
 
 
 def test_format_pickup_breakdown_label_uses_intermediate_result() -> None:

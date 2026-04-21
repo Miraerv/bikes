@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.core.admin_user_lookup import find_admin_user_by_phone
+from app.core.display import MISSING_LABEL
 from app.db.models.bot_user import ROLE_LABEL, BotUser, UserRole
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ class RegistrationApplication:
 def admin_user_registration_name(admin_user: AdminUser) -> str:
     surname = f" {admin_user.surname}" if admin_user.surname else ""
     name = f"{admin_user.name}{surname}"
-    return name if name.strip() else "—"
+    return name if name.strip() else MISSING_LABEL
 
 
 async def create_registration_application(
