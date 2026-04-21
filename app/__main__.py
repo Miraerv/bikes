@@ -20,6 +20,29 @@ from app.core.logging import setup_logging
 from app.core.tz import YAKUTSK_TZ
 from app.internal_api import create_api_app
 
+NO_ONLINE_COURIER_SLOTS = ("08:15", "16:15")
+NO_ONLINE_COURIER_MISFIRE_GRACE_SECONDS = 900
+
+
+def _schedule_no_online_courier_check(
+    scheduler: AsyncIOScheduler,
+    bot: Bot,
+    slot: str,
+) -> None:
+    """Schedule one no-online-courier control slot."""
+    hour, minute = (int(part) for part in slot.split(":", maxsplit=1))
+    scheduler.add_job(
+        check_no_online_couriers,
+        "cron",
+        hour=hour,
+        minute=minute,
+        args=[bot, slot],
+        id=f"check_no_online_couriers_{hour:02d}{minute:02d}",
+        replace_existing=True,
+        coalesce=True,
+        misfire_grace_time=NO_ONLINE_COURIER_MISFIRE_GRACE_SECONDS,
+    )
+
 
 async def main() -> None:
     """Application entry point."""
@@ -44,34 +67,15 @@ async def main() -> None:
     scheduler.add_job(
         check_frequent_breakdowns, "interval", minutes=alert_interval, args=[bot],
     )
-    scheduler.add_job(
-        check_no_online_couriers,
-        "cron",
-        hour=8,
-        minute=15,
-        args=[bot, "08:15"],
-        id="check_no_online_couriers_0815",
-        replace_existing=True,
-        coalesce=True,
-        misfire_grace_time=900,
-    )
-    scheduler.add_job(
-        check_no_online_couriers,
-        "cron",
-        hour=16,
-        minute=15,
-        args=[bot, "16:15"],
-        id="check_no_online_couriers_1615",
-        replace_existing=True,
-        coalesce=True,
-        misfire_grace_time=900,
-    )
+    for slot in NO_ONLINE_COURIER_SLOTS:
+        _schedule_no_online_courier_check(scheduler, bot, slot)
 
     scheduler.start()
     logger.info(
         "Scheduler started: auto_close every 1h, alerts every {m}min, "
-        "no-online-courier at 08:15/16:15 Asia/Yakutsk",
+        "no-online-courier at {slots} Asia/Yakutsk",
         m=alert_interval,
+        slots="/".join(NO_ONLINE_COURIER_SLOTS),
     )
 
     # Start internal HTTP API

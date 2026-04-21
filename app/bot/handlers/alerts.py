@@ -14,7 +14,6 @@ All group members are expected to be admins.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta
 from html import escape
 from typing import TYPE_CHECKING
@@ -25,6 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.admin_access import get_admin_telegram_ids
 from app.core.config import settings
+from app.core.store_ids import parse_store_id_set
 from app.core.tz import now_display
 from app.db.base import market_session_maker
 from app.db.models.bike import Bike, BikeStatus
@@ -105,27 +105,6 @@ async def _send_direct_alert(
         )
 
 
-def _parse_store_ids(raw_store_ids: str | None) -> set[int]:
-    """Parse JSON store_ids into integers, ignoring malformed values."""
-    if not raw_store_ids:
-        return set()
-
-    try:
-        parsed = json.loads(raw_store_ids)
-    except (TypeError, ValueError):
-        return set()
-
-    values = parsed if isinstance(parsed, list) else [parsed]
-
-    store_ids: set[int] = set()
-    for value in values:
-        try:
-            store_ids.add(int(value))
-        except (TypeError, ValueError):
-            continue
-    return store_ids
-
-
 def _control_ts_for_slot(slot: str) -> datetime:
     """Return a naive DB-comparable timestamp for today's Yakutsk slot."""
     hour, minute = (int(part) for part in slot.split(":", maxsplit=1))
@@ -157,7 +136,7 @@ def _shift_covers_store_at_control_time(
     """Return True when a courier shift covers a store at the control timestamp."""
     if not _shift_is_online_at_control_time(shift, control_ts=control_ts):
         return False
-    return store_id in _parse_store_ids(shift.store_ids)
+    return store_id in parse_store_id_set(shift.store_ids)
 
 
 def _find_stores_without_online_courier(

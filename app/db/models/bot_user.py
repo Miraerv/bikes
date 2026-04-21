@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
-from contextlib import suppress
 from datetime import datetime  # noqa: TC003 — SQLAlchemy needs at runtime
 from enum import StrEnum
 
 from sqlalchemy import BigInteger, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.store_ids import dump_store_ids, parse_store_id_list
 from app.db.base import MarketBase
 
 
@@ -91,20 +90,11 @@ class BotUser(MarketBase):
     @property
     def assigned_store_ids(self) -> list[int]:
         """Return assigned store ids for supervisors, empty when not configured."""
-        if not self.store_ids:
-            return []
-
-        with suppress(ValueError, TypeError, json.JSONDecodeError):
-            raw_ids = json.loads(self.store_ids)
-            if isinstance(raw_ids, list):
-                return [int(store_id) for store_id in raw_ids]
-
-        return []
+        return parse_store_id_list(self.store_ids)
 
     def set_assigned_store_ids(self, store_ids: list[int]) -> None:
         """Persist sorted unique store ids as JSON."""
-        normalized = sorted(set(store_ids))
-        self.store_ids = json.dumps(normalized, ensure_ascii=True)
+        self.store_ids = dump_store_ids(store_ids)
 
     def __repr__(self) -> str:
         return (
