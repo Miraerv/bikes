@@ -6,13 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from aiogram import F, Router
-from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
-)
+from aiogram.types import ReplyKeyboardRemove
 from loguru import logger
 from sqlalchemy import select
 
@@ -22,6 +16,12 @@ from app.bot.keyboards.callbacks import (
     AdminSupervisorStoreActionCB,
     AdminSupervisorStoreCB,
     RegistrationCB,
+)
+from app.bot.keyboards.registration import (
+    admin_approval_kb,
+    admin_role_select_kb,
+    admin_supervisor_store_kb,
+    registration_share_contact_kb,
 )
 from app.bot.states.bike import RegistrationForm
 from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
@@ -41,120 +41,7 @@ if TYPE_CHECKING:
     from aiogram.types import CallbackQuery, Message
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.db.models.store import Store
-
 router = Router(name="registration")
-
-
-# ── Keyboards ──────────────────────────────────────────────────────────
-
-
-def _apply_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="📝 Отправить заявку",
-            callback_data=RegistrationCB(action="apply").pack(),
-        )],
-    ])
-
-
-def _share_contact_kb() -> ReplyKeyboardMarkup:
-    """Reply keyboard with 'Share contact' button."""
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-
-
-def _approval_kb(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="✅ Одобрить",
-                callback_data=AdminApprovalCB(
-                    user_id=user_id, action="approve",
-                ).pack(),
-            ),
-            InlineKeyboardButton(
-                text="❌ Отклонить",
-                callback_data=AdminApprovalCB(
-                    user_id=user_id, action="reject",
-                ).pack(),
-            ),
-        ],
-    ])
-
-
-def _role_select_kb(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="👑 Админ",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id, role="admin",
-            ).pack(),
-        )],
-        [InlineKeyboardButton(
-            text="📋 Супервайзер",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id, role="supervisor",
-            ).pack(),
-        )],
-        [InlineKeyboardButton(
-            text="🔧 Мастер",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id, role="mechanic",
-            ).pack(),
-        )],
-        [InlineKeyboardButton(
-            text="🚚 Курьер",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id, role="courier",
-            ).pack(),
-        )],
-    ])
-
-
-def _supervisor_store_kb(
-    user_id: int,
-    selected_store_ids: set[int],
-    stores: list[Store],
-) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-
-    for store in stores:
-        is_selected = store.id in selected_store_ids
-        prefix = "✅" if is_selected else "⬜️"
-        rows.append([
-            InlineKeyboardButton(
-                text=f"{prefix} {store.display_name}",
-                callback_data=AdminSupervisorStoreCB(
-                    user_id=user_id,
-                    store_id=store.id,
-                ).pack(),
-            ),
-        ])
-
-    rows.append([
-        InlineKeyboardButton(
-            text=f"💾 Сохранить ({len(selected_store_ids)})",
-            callback_data=AdminSupervisorStoreActionCB(
-                user_id=user_id,
-                action="save",
-            ).pack(),
-        ),
-    ])
-    rows.append([
-        InlineKeyboardButton(
-            text="← Назад к ролям",
-            callback_data=AdminSupervisorStoreActionCB(
-                user_id=user_id,
-                action="back",
-            ).pack(),
-        ),
-    ])
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _notify_other_admins(
@@ -224,7 +111,7 @@ async def reg_start(
         "📱 <b>Поделитесь контактом</b>\n\n"
         "Нажмите кнопку ниже, чтобы отправить свой номер телефона.\n"
         "Мы найдём вас в системе автоматически.",
-        reply_markup=_share_contact_kb(),
+        reply_markup=registration_share_contact_kb(),
     )
 
 
@@ -246,7 +133,7 @@ async def reg_contact(
     if contact is None:
         await message.answer(
             "⚠️ Пожалуйста, нажмите кнопку <b>«📱 Поделиться номером»</b> ниже.",
-            reply_markup=_share_contact_kb(),
+            reply_markup=registration_share_contact_kb(),
         )
         return
 
@@ -255,7 +142,7 @@ async def reg_contact(
         await message.answer(
             "⚠️ Пожалуйста, отправьте <b>свой</b> контакт, а не чужой.\n"
             "Нажмите кнопку «📱 Поделиться номером».",
-            reply_markup=_share_contact_kb(),
+            reply_markup=registration_share_contact_kb(),
         )
         return
 
@@ -265,7 +152,7 @@ async def reg_contact(
     if not phone_digits:
         await message.answer(
             "⚠️ Не удалось получить номер телефона. Попробуйте ещё раз.",
-            reply_markup=_share_contact_kb(),
+            reply_markup=registration_share_contact_kb(),
         )
         return
 
@@ -320,7 +207,7 @@ async def reg_contact(
             sent = await bot.send_message(
                 tg_admin_id,
                 admin_message,
-                reply_markup=_approval_kb(bot_user.id),
+                reply_markup=admin_approval_kb(bot_user.id),
             )
             market_session.add(BotUserAdminNotification(
                 bot_user_id=bot_user.id,
@@ -342,7 +229,7 @@ async def reg_text_instead_of_contact(
     await message.answer(
         "⚠️ Пожалуйста, нажмите кнопку <b>«📱 Поделиться номером»</b> ниже.\n"
         "Не вводите номер текстом.",
-        reply_markup=_share_contact_kb(),
+        reply_markup=registration_share_contact_kb(),
     )
 
 
@@ -379,7 +266,7 @@ async def admin_approve(
     await callback.message.edit_text(  # type: ignore[union-attr]
         f"👤 <b>{user.name}</b>\n\n"
         "Выберите роль:",
-        reply_markup=_role_select_kb(user.id),
+        reply_markup=admin_role_select_kb(user.id),
     )
 
 
@@ -478,7 +365,7 @@ async def admin_assign_role(
         await callback.message.edit_text(  # type: ignore[union-attr]
             f"👤 <b>{user.name}</b>\n\n"
             "Выберите склады, к которым будет привязан супервайзер:",
-            reply_markup=_supervisor_store_kb(user.id, selected_store_ids, stores),
+            reply_markup=admin_supervisor_store_kb(user.id, selected_store_ids, stores),
         )
         return
 
@@ -551,7 +438,7 @@ async def admin_toggle_supervisor_store(
     await state.update_data(supervisor_store_ids=sorted(store_ids))
     stores = await get_accessible_stores(market_session)
     await callback.message.edit_reply_markup(  # type: ignore[union-attr]
-        reply_markup=_supervisor_store_kb(callback_data.user_id, store_ids, stores),
+        reply_markup=admin_supervisor_store_kb(callback_data.user_id, store_ids, stores),
     )
 
 
@@ -584,7 +471,7 @@ async def admin_supervisor_store_back(
     await callback.message.edit_text(  # type: ignore[union-attr]
         f"👤 <b>{user.name}</b>\n\n"
         "Выберите роль:",
-        reply_markup=_role_select_kb(user.id),
+        reply_markup=admin_role_select_kb(user.id),
     )
 
 

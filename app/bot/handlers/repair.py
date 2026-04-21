@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, Message
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -16,6 +16,7 @@ from app.bot.keyboards.builders import (
     repair_bike_select_kb,
     repair_breakdown_select_kb,
     repair_complete_confirm_kb,
+    repair_mechanic_select_kb,
     repair_menu_kb,
     repair_my_list_kb,
     repair_pickup_confirm_kb,
@@ -57,24 +58,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 router = Router(name="repair")
-
-
-# ── Helpers ────────────────────────────────────────────────────────────
-
-
-def _mechanic_select_kb(mechanics: list[BotUser]) -> InlineKeyboardMarkup:
-    """Build inline keyboard for selecting a mechanic (from BotUser)."""
-    buttons = []
-    for mech in mechanics:
-        buttons.append([InlineKeyboardButton(
-            text=f"🔧 {mech.name}",
-            callback_data=RepairMechanicSelectCB(mechanic_id=mech.id).pack(),
-        )])
-    buttons.append([InlineKeyboardButton(
-        text="❌ Отмена",
-        callback_data=RepairPickupConfirmCB(action="cancel").pack(),
-    )])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # ── Repair sub-menu ─────────────────────────────────────────────────────
@@ -280,7 +263,7 @@ async def _pick_mechanic(
     await state.set_state(RepairPickupForm.mechanic)
     await callback.message.edit_text(  # type: ignore[union-attr]
         "🔧 Выберите <b>мастера</b>:",
-        reply_markup=_mechanic_select_kb(mechanics),
+        reply_markup=repair_mechanic_select_kb(mechanics),
     )
 
 

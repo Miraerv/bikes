@@ -9,25 +9,14 @@ from aiogram.filters import Command, CommandStart
 from loguru import logger
 
 from app.bot.keyboards.builders import courier_menu_kb, main_menu_kb
-from app.bot.keyboards.callbacks import RegistrationCB
+from app.bot.keyboards.registration import registration_apply_kb
 
 if TYPE_CHECKING:
-    from aiogram.types import InlineKeyboardMarkup, Message
+    from aiogram.types import Message
 
     from app.db.models.bot_user import BotUser
 
 router = Router(name="start")
-
-
-def _apply_kb() -> InlineKeyboardMarkup:
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="📝 Отправить заявку",
-            callback_data=RegistrationCB(action="apply").pack(),
-        )],
-    ])
 
 
 @router.message(CommandStart())
@@ -66,7 +55,7 @@ async def cmd_start(
         f"👋 Привет, <b>{tg_user.first_name or 'друг'}</b>!\n\n"
         "Для работы с ботом нужен доступ.\n"
         "Отправьте заявку администратору:",
-        reply_markup=_apply_kb(),
+        reply_markup=registration_apply_kb(),
     )
 
 
