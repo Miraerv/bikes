@@ -18,7 +18,7 @@ from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
 from app.core.config import settings
 from app.core.sla import get_sla_emoji, is_sla_eligible_layer, order_row_is_within_sla
 from app.core.store_ids import parse_store_id_set
-from app.core.tz import now_display
+from app.core.tz import now_display, to_yakutsk
 from app.db.base import market_session_maker
 from app.db.models.admin_user import AdminUser
 from app.db.models.bot_user import BotUser, UserRole
@@ -490,10 +490,16 @@ def _format_store_summary_lines(
     ]
 
 
-def _format_courier_lines(row: CourierReportRow) -> list[str]:
+def _format_courier_lines(row: CourierReportRow, report_date: date) -> list[str]:
+    started_at = to_yakutsk(row.started_at)
+    started_label = (
+        f"{started_at:%H:%M}"
+        if started_at.date() == report_date
+        else f"{started_at:%d.%m %H:%M}"
+    )
     return [
         f"Имя: <b>{escape(row.courier_name)}</b>",
-        f"Начал смену: <b>{row.started_at:%H:%M}</b>",
+        f"Начал смену: <b>{started_label}</b>",
         f"Заказов: <b>{row.total_orders}</b>",
         f"SLA: {_format_sla_html(row.sla)}",
     ]
@@ -514,7 +520,7 @@ def _format_store_report_messages(
     first_block_in_message = True
 
     for row in report.couriers:
-        block = _format_courier_lines(row)
+        block = _format_courier_lines(row, report_date)
         separator = [] if first_block_in_message else [""]
         candidate_lines = [*current_lines, *separator, *block]
         candidate = "\n".join(candidate_lines)

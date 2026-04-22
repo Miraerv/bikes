@@ -214,6 +214,50 @@ def test_build_recipient_report_groups_routes_admins_and_supervisors() -> None:
     ]
 
 
+def test_format_courier_lines_displays_yakutsk_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = report.CourierReportRow(
+        courier_id=1,
+        courier_name="Ivan",
+        started_at=datetime(2026, 4, 21, 23, 42),
+        total_orders=1,
+        sla_eligible_orders=1,
+        good_sla_orders=1,
+    )
+
+    monkeypatch.setattr(
+        report,
+        "to_yakutsk",
+        lambda _dt: datetime(2026, 4, 22, 8, 42),
+    )
+
+    lines = report._format_courier_lines(row, date(2026, 4, 22))
+
+    assert "Начал смену: <b>08:42</b>" in lines
+
+
+def test_format_courier_lines_includes_date_for_previous_day_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = report.CourierReportRow(
+        courier_id=1,
+        courier_name="Ivan",
+        started_at=datetime(2026, 4, 21, 14, 42),
+        total_orders=1,
+        sla_eligible_orders=1,
+        good_sla_orders=1,
+    )
+
+    monkeypatch.setattr(
+        report,
+        "to_yakutsk",
+        lambda _dt: datetime(2026, 4, 20, 23, 42),
+    )
+
+    lines = report._format_courier_lines(row, date(2026, 4, 21))
+
+    assert "Начал смену: <b>20.04 23:42</b>" in lines
+
+
 def test_format_store_report_messages_splits_long_courier_lists() -> None:
     rows = [
         report.CourierReportRow(
