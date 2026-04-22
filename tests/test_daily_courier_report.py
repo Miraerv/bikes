@@ -81,6 +81,19 @@ def test_resolve_report_date_defaults_to_previous_yakutsk_day(
     assert report._resolve_report_date(date(2026, 4, 20)) == date(2026, 4, 20)
 
 
+def test_parse_test_report_date() -> None:
+    assert report._parse_test_report_date("/test_courier_report") == (None, None)
+    assert report._parse_test_report_date("/test_courier_report 2026-04-21") == (
+        date(2026, 4, 21),
+        None,
+    )
+
+    parsed_date, error = report._parse_test_report_date("/test_courier_report 21.04.2026")
+
+    assert parsed_date is None
+    assert error is not None
+
+
 def test_build_store_reports_aggregates_couriers_orders_and_sla() -> None:
     stores = [_store(54, "Чиряева")]
     shifts = [

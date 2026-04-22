@@ -6,6 +6,7 @@ from app.bot.handlers.bike_card import router as bike_card_router
 from app.bot.handlers.breakdown import router as breakdown_router
 from app.bot.handlers.change_status import router as change_status_router
 from app.bot.handlers.courier_shift import router as courier_shift_router
+from app.bot.handlers.daily_courier_report import router as daily_courier_report_router
 from app.bot.handlers.dashboard import router as dashboard_router
 from app.bot.handlers.decommission import router as decommission_router
 from app.bot.handlers.list_bikes import router as list_bikes_router
@@ -30,5 +31,6 @@ router.include_router(repair_router)
 router.include_router(dashboard_router)
 router.include_router(analytics_router)
 router.include_router(courier_shift_router)
+router.include_router(daily_courier_report_router)
 
 __all__ = ["router"]

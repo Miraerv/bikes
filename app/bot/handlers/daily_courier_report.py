@@ -9,10 +9,12 @@ from decimal import Decimal
 from html import escape
 from typing import TYPE_CHECKING
 
+from aiogram import Router
+from aiogram.filters import Command
 from loguru import logger
 from sqlalchemy import bindparam, select, text
 
-from app.core.admin_access import get_admin_telegram_ids
+from app.core.admin_access import get_admin_telegram_ids, is_admin_actor
 from app.core.config import settings
 from app.core.sla import get_sla_emoji, is_sla_eligible_layer, order_row_is_within_sla
 from app.core.store_ids import parse_store_id_set
@@ -27,10 +29,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
     from aiogram import Bot
+    from aiogram.types import Message
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
 TELEGRAM_MESSAGE_SOFT_LIMIT = 3500
+TEST_REPORT_COMMAND = "test_courier_report"
+
+router = Router(name="daily_courier_report")
 
 
 _REPORT_ORDERS_QUERY = text("""
@@ -176,6 +182,25 @@ def _resolve_report_date(report_date: date | None = None) -> date:
 def _report_period(report_date: date) -> tuple[datetime, datetime]:
     start = datetime.combine(report_date, time.min)
     return start, start + timedelta(days=1)
+
+
+def _parse_test_report_date(text: str | None) -> tuple[date | None, str | None]:
+    if not text:
+        return None, None
+
+    parts = text.split(maxsplit=1)
+    if len(parts) == 1:
+        return None, None
+
+    raw_date = parts[1].strip()
+    try:
+        return date.fromisoformat(raw_date), None
+    except ValueError:
+        return (
+            None,
+            "Дата должна быть в формате <code>YYYY-MM-DD</code>, "
+            f"например <code>/{TEST_REPORT_COMMAND} 2026-04-21</code>.",
+        )
 
 
 def _coerce_optional_int(value: object) -> int | None:
@@ -574,3 +599,73 @@ async def send_daily_courier_report(
         stores=len(reports),
         recipients=len(recipient_groups),
     )
+
+
+async def send_daily_courier_report_to_chat(
+    bot: Bot,
+    chat_id: int,
+    report_date: date | None = None,
+) -> int:
+    """Send all daily courier reports to one chat for a production smoke test."""
+    resolved_report_date = _resolve_report_date(report_date)
+
+    async with market_session_maker() as session:
+        reports = await _load_store_reports(session, resolved_report_date)
+
+    message_count = 0
+    for store_report in reports:
+        for message in _format_store_report_messages(store_report, resolved_report_date):
+            await _send_direct_report(
+                bot,
+                chat_id,
+                message,
+                recipient_kind="test_admin",
+            )
+            message_count += 1
+
+    logger.info(
+        "send_daily_courier_report_to_chat: sent {messages} messages for {stores} "
+        "stores to chat {chat_id}",
+        messages=message_count,
+        stores=len(reports),
+        chat_id=chat_id,
+    )
+    return message_count
+
+
+@router.message(Command(TEST_REPORT_COMMAND))
+async def cmd_test_courier_report(
+    message: Message,
+    bot_user: BotUser | None = None,
+) -> None:
+    """Admin-only command for sending the daily report to the current chat."""
+    if message.from_user is None:
+        return
+
+    if not is_admin_actor(bot_user, message.from_user.id):
+        await message.answer("⛔ Команда доступна только админам.")
+        return
+
+    requested_report_date, error = _parse_test_report_date(message.text)
+    if error is not None:
+        await message.answer(error)
+        return
+
+    resolved_report_date = _resolve_report_date(requested_report_date)
+    await message.answer(
+        "Собираю тестовый отчет за "
+        f"<b>{resolved_report_date:%d.%m.%Y}</b>.\n"
+        "Отправлю только в этот чат.",
+    )
+
+    if message.bot is None:
+        logger.warning("test courier report command has no bot bound to message")
+        await message.answer("Не удалось отправить отчет: bot не привязан к сообщению.")
+        return
+
+    sent_messages = await send_daily_courier_report_to_chat(
+        message.bot,
+        message.chat.id,
+        resolved_report_date,
+    )
+    await message.answer(f"Готово. Отправлено сообщений: <b>{sent_messages}</b>.")
