@@ -15,6 +15,7 @@ from app.bot.handlers.alerts import (
     check_no_online_couriers,
 )
 from app.bot.handlers.auto_close import auto_close_stale_logs
+from app.bot.handlers.daily_courier_report import send_daily_courier_report
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.tz import YAKUTSK_TZ
@@ -22,6 +23,7 @@ from app.internal_api import create_api_app
 
 NO_ONLINE_COURIER_SLOTS = ("08:15", "16:15")
 NO_ONLINE_COURIER_MISFIRE_GRACE_SECONDS = 900
+DAILY_COURIER_REPORT_MISFIRE_GRACE_SECONDS = 3600
 
 
 def _schedule_no_online_courier_check(
@@ -59,6 +61,17 @@ async def main() -> None:
     # Start scheduler
     scheduler = AsyncIOScheduler(timezone=YAKUTSK_TZ)
     scheduler.add_job(auto_close_stale_logs, "interval", hours=1)
+    scheduler.add_job(
+        send_daily_courier_report,
+        "cron",
+        hour=0,
+        minute=0,
+        args=[bot],
+        id="send_daily_courier_report",
+        replace_existing=True,
+        coalesce=True,
+        misfire_grace_time=DAILY_COURIER_REPORT_MISFIRE_GRACE_SECONDS,
+    )
 
     # Alert cron tasks (BIKE-80..84)
     alert_interval = settings.alert_check_minutes
@@ -76,7 +89,7 @@ async def main() -> None:
     scheduler.start()
     logger.info(
         "Scheduler started: auto_close every 1h, alerts every {m}min, "
-        "no-online-courier at {slots} Asia/Yakutsk",
+        "daily courier report at 00:00, no-online-courier at {slots} Asia/Yakutsk",
         m=alert_interval,
         slots="/".join(NO_ONLINE_COURIER_SLOTS),
     )

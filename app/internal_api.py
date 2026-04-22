@@ -15,6 +15,11 @@ from sqlalchemy import select, text
 
 from app.core.admin_access import get_admin_telegram_ids
 from app.core.config import settings
+from app.core.sla import (
+    get_sla_emoji,
+    is_order_within_sla,
+    order_row_is_within_sla,
+)
 from app.db.base import market_session_maker
 from app.db.models.admin_user import AdminUser
 from app.db.models.bot_user import BotUser
@@ -61,12 +66,6 @@ _COURIER_SHIFT_ORDERS_QUERY = text("""
         AND bdd.layer IN (1, 2)
 """)
 
-_MAX_DELIVERY_MINUTES_BY_LAYER = {
-    1: 45,
-    2: 60,
-}
-
-
 @dataclass(frozen=True, slots=True)
 class ShiftStats:
     courier_name: str
@@ -75,22 +74,15 @@ class ShiftStats:
 
 
 def _get_sla_emoji(sla: float) -> str:
-    if sla >= 95:
-        return "🟢"
-    if sla >= 90:
-        return "🟡"
-    return "🔴"
+    return get_sla_emoji(sla)
 
 
 def _is_order_within_sla(layer: int, minutes: int) -> bool:
-    max_minutes = _MAX_DELIVERY_MINUTES_BY_LAYER.get(layer)
-    return max_minutes is not None and minutes <= max_minutes
+    return is_order_within_sla(layer, minutes)
 
 
 def _order_row_is_within_sla(full_time: int | None, layer: int | None) -> bool:
-    normalized_layer = int(layer) if layer is not None else 0
-    minutes = full_time or 0
-    return _is_order_within_sla(normalized_layer, minutes)
+    return order_row_is_within_sla(full_time, layer)
 
 
 def _format_shift_ended_message(shift_id: int | None, stats: ShiftStats) -> str:
