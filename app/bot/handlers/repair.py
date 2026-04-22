@@ -139,8 +139,7 @@ async def rp_choose_bike(
 
     if not bikes:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            "📭 На этом складе нет байков для ремонта\n"
-            "(нужен статус 🟡 Проверка или 🔴 Ремонт).",
+            "📭 На этом складе нет байков для ремонта\n(нужен статус 🟡 Проверка или 🔴 Ремонт).",
             reply_markup=repair_menu_kb(),
         )
         await state.clear()
@@ -192,8 +191,7 @@ async def rp_choose_breakdown(
 
     await state.set_state(RepairPickupForm.breakdown)
     await callback.message.edit_text(  # type: ignore[union-attr]
-        "🔗 Привязать к <b>поломке</b>?\n\n"
-        "Выберите поломку или пропустите:",
+        "🔗 Привязать к <b>поломке</b>?\n\nВыберите поломку или пропустите:",
         reply_markup=repair_breakdown_select_kb(breakdowns),
     )
 
@@ -248,8 +246,7 @@ async def _pick_mechanic(
 
     if not mechanics:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            "⚠️ Нет активных мастеров.\n"
-            "Добавьте мастера через регистрацию в боте.",
+            "⚠️ Нет активных мастеров.\nДобавьте мастера через регистрацию в боте.",
             reply_markup=repair_menu_kb(),
         )
         await state.clear()
@@ -571,7 +568,8 @@ async def _show_complete_confirm(
     # event can be Message (from text input) or CallbackQuery
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(  # type: ignore[union-attr]
-            text, reply_markup=repair_complete_confirm_kb(),
+            text,
+            reply_markup=repair_complete_confirm_kb(),
         )
     else:
         await event.answer(text, reply_markup=repair_complete_confirm_kb())
@@ -620,9 +618,7 @@ async def rp_complete_save(
     await state.clear()
 
     duration_label = (
-        f"{draft.repair_duration_minutes} мин."
-        if draft.repair_duration_minutes
-        else "—"
+        f"{draft.repair_duration_minutes} мин." if draft.repair_duration_minutes else "—"
     )
     cost_label = f"{draft.cost} ₽" if draft.cost else "—"
 
@@ -695,8 +691,7 @@ async def rp_my_repairs(
 
     if not bot_user:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            "⚠️ <b>Пользователь не найден</b>\n\n"
-            "Ваш аккаунт не зарегистрирован.",
+            "⚠️ <b>Пользователь не найден</b>\n\nВаш аккаунт не зарегистрирован.",
             reply_markup=repair_menu_kb(),
         )
         return

@@ -96,8 +96,7 @@ async def reg_start(
     if existing:
         if existing.is_pending:
             await callback.message.edit_text(  # type: ignore[union-attr]
-                "⏳ Ваша заявка уже на рассмотрении.\n"
-                "Ожидайте решения администратора.",
+                "⏳ Ваша заявка уже на рассмотрении.\nОжидайте решения администратора.",
             )
         else:
             await callback.message.edit_text(  # type: ignore[union-attr]
@@ -209,11 +208,13 @@ async def reg_contact(
                 admin_message,
                 reply_markup=admin_approval_kb(bot_user.id),
             )
-            market_session.add(BotUserAdminNotification(
-                bot_user_id=bot_user.id,
-                admin_telegram_id=tg_admin_id,
-                message_id=sent.message_id,
-            ))
+            market_session.add(
+                BotUserAdminNotification(
+                    bot_user_id=bot_user.id,
+                    admin_telegram_id=tg_admin_id,
+                    message_id=sent.message_id,
+                ),
+            )
         except Exception:
             logger.warning(
                 "Could not notify admin tg_id={tg_id} about registration",
@@ -258,14 +259,12 @@ async def admin_approve(
 
     if not user.is_pending:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"✅ <b>{user.name}</b> уже одобрен.\n\n"
-            f"Роль: {user.role_label}",
+            f"✅ <b>{user.name}</b> уже одобрен.\n\nРоль: {user.role_label}",
         )
         return
 
     await callback.message.edit_text(  # type: ignore[union-attr]
-        f"👤 <b>{user.name}</b>\n\n"
-        "Выберите роль:",
+        f"👤 <b>{user.name}</b>\n\nВыберите роль:",
         reply_markup=admin_role_select_kb(user.id),
     )
 
@@ -310,12 +309,12 @@ async def admin_reject(
     try:
         await bot.send_message(
             user.telegram_id,
-            "❌ Ваша заявка на доступ была отклонена.\n"
-            "Свяжитесь с администратором для уточнения.",
+            "❌ Ваша заявка на доступ была отклонена.\nСвяжитесь с администратором для уточнения.",
         )
     except Exception:
         logger.warning(
-            "Could not notify rejected user tg_id={tg_id}", tg_id=user.telegram_id,
+            "Could not notify rejected user tg_id={tg_id}",
+            tg_id=user.telegram_id,
         )
 
 
@@ -343,8 +342,7 @@ async def admin_assign_role(
 
     if not user.is_pending:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"✅ <b>{user.name}</b> уже одобрен.\n\n"
-            f"Роль: {user.role_label}",
+            f"✅ <b>{user.name}</b> уже одобрен.\n\nРоль: {user.role_label}",
         )
         return
 
@@ -363,8 +361,7 @@ async def admin_assign_role(
             supervisor_store_ids=sorted(selected_store_ids),
         )
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"👤 <b>{user.name}</b>\n\n"
-            "Выберите склады, к которым будет привязан супервайзер:",
+            f"👤 <b>{user.name}</b>\n\nВыберите склады, к которым будет привязан супервайзер:",
             reply_markup=admin_supervisor_store_kb(user.id, selected_store_ids, stores),
         )
         return
@@ -378,8 +375,7 @@ async def admin_assign_role(
     )
 
     await callback.message.edit_text(  # type: ignore[union-attr]
-        f"✅ <b>{user.name}</b> → {role_label}\n\n"
-        "Роль успешно назначена.",
+        f"✅ <b>{user.name}</b> → {role_label}\n\nРоль успешно назначена.",
     )
 
     await _notify_other_admins(
@@ -387,8 +383,7 @@ async def admin_assign_role(
         market_session,
         user.id,
         callback.from_user.id,
-        f"✅ <b>{user.name}</b> уже одобрен.\n\n"
-        f"Роль: {role_label}",
+        f"✅ <b>{user.name}</b> уже одобрен.\n\nРоль: {role_label}",
     )
 
     try:
@@ -400,7 +395,8 @@ async def admin_assign_role(
         )
     except Exception:
         logger.warning(
-            "Could not notify approved user tg_id={tg_id}", tg_id=user.telegram_id,
+            "Could not notify approved user tg_id={tg_id}",
+            tg_id=user.telegram_id,
         )
 
 
@@ -469,8 +465,7 @@ async def admin_supervisor_store_back(
         return
 
     await callback.message.edit_text(  # type: ignore[union-attr]
-        f"👤 <b>{user.name}</b>\n\n"
-        "Выберите роль:",
+        f"👤 <b>{user.name}</b>\n\nВыберите роль:",
         reply_markup=admin_role_select_kb(user.id),
     )
 
@@ -508,9 +503,7 @@ async def admin_save_supervisor_role(
         return
 
     stores = await get_accessible_stores(market_session)
-    store_names = [
-        store.display_name for store in stores if store.id in set(store_ids)
-    ]
+    store_names = [store.display_name for store in stores if store.id in set(store_ids)]
 
     role_label = assign_supervisor_role(user, store_ids)
     await state.clear()
@@ -523,9 +516,7 @@ async def admin_save_supervisor_role(
 
     store_lines = "\n".join(f"• {name}" for name in store_names)
     await callback.message.edit_text(  # type: ignore[union-attr]
-        f"✅ <b>{user.name}</b> → {role_label}\n\n"
-        "Привязанные склады:\n"
-        f"{store_lines}",
+        f"✅ <b>{user.name}</b> → {role_label}\n\nПривязанные склады:\n{store_lines}",
     )
 
     await _notify_other_admins(

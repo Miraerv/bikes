@@ -29,10 +29,14 @@ class BikeAlert(MarketBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     bike_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("boom_bikes.id", ondelete="CASCADE"), nullable=True,
+        BigInteger,
+        ForeignKey("boom_bikes.id", ondelete="CASCADE"),
+        nullable=True,
     )
     store_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("boom_stores.id", ondelete="SET NULL"), nullable=True,
+        BigInteger,
+        ForeignKey("boom_stores.id", ondelete="SET NULL"),
+        nullable=True,
     )
     alert_type: Mapped[AlertType] = mapped_column(
         Enum(AlertType, values_callable=lambda e: [x.value for x in e]),
@@ -42,15 +46,21 @@ class BikeAlert(MarketBase):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     # — Relationships —
     bike: Mapped[Bike | None] = relationship(
-        back_populates="alerts", lazy="selectin",
+        back_populates="alerts",
+        lazy="selectin",
     )
     store: Mapped[Store | None] = relationship(lazy="selectin")
 

@@ -82,7 +82,6 @@ async def confirm_decommission(
     logger.info("Bike {number} decommissioned", number=bike.bike_number)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
-        f"⚫ Байк <b>{bike.bike_number}</b> списан.\n\n"
-        f"🏍 {bike.model}",
+        f"⚫ Байк <b>{bike.bike_number}</b> списан.\n\n🏍 {bike.model}",
         reply_markup=bike_menu_kb(),
     )

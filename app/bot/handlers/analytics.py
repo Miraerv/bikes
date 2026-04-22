@@ -49,9 +49,7 @@ async def open_analytics_menu(callback: CallbackQuery) -> None:
     """Show analytics sub-menu with report buttons."""
     await callback.answer()
     await callback.message.edit_text(  # type: ignore[union-attr]
-        "📊 <b>Аналитика</b>\n\n"
-        f"Отчёты за последние {REPORT_DAYS} дней.\n"
-        "Выберите отчёт:",
+        f"📊 <b>Аналитика</b>\n\nОтчёты за последние {REPORT_DAYS} дней.\nВыберите отчёт:",
         reply_markup=analytics_menu_kb(),
     )
 
@@ -293,9 +291,7 @@ async def report_downtime(
 
     # Fetch bikes with their repairs
     q = apply_store_scope(
-        select(Bike)
-        .options(joinedload(Bike.repairs))
-        .where(Bike.status != "decommissioned"),
+        select(Bike).options(joinedload(Bike.repairs)).where(Bike.status != "decommissioned"),
         Bike.store_id,
         bot_user,
     )
@@ -307,10 +303,7 @@ async def report_downtime(
     for bike in bikes:
         total_hours = max(
             1,
-            (
-                now
-                - datetime.combine(bike.commissioned_at, datetime.min.time())
-            ).total_seconds()
+            (now - datetime.combine(bike.commissioned_at, datetime.min.time())).total_seconds()
             / 3600,
         )
         repair_hours = 0.0
@@ -331,8 +324,7 @@ async def report_downtime(
         for i, (number, model, pct, hours) in enumerate(top, 1):
             bar = _progress_bar(pct)
             lines.append(
-                f"  {i}. <b>{number}</b> ({model})\n"
-                f"      {bar} {pct:.1f}% ({hours}ч в ремонте)",
+                f"  {i}. <b>{number}</b> ({model})\n      {bar} {pct:.1f}% ({hours}ч в ремонте)",
             )
     else:
         lines.append("<i>Нет данных</i>")
@@ -399,8 +391,7 @@ async def report_careful_couriers(
             full = f"{name} {surname}" if surname else name
             medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
             lines.append(
-                f"  {medal} {full}\n"
-                f"      смен: {shifts} • поломок: {bds}",
+                f"  {medal} {full}\n      смен: {shifts} • поломок: {bds}",
             )
     else:
         lines.append("<i>Нет данных за период</i>")

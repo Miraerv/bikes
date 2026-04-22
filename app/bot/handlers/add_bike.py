@@ -86,16 +86,14 @@ async def process_bike_number(
     )
     if existing.scalar_one_or_none() is not None:
         await message.answer(
-            f"⚠️ Байк с номером <b>{bike_number}</b> уже существует.\n"
-            "Введите другой номер:",
+            f"⚠️ Байк с номером <b>{bike_number}</b> уже существует.\nВведите другой номер:",
         )
         return
 
     await state.update_data(bike_number=bike_number)
     await state.set_state(AddBikeForm.model)
     await message.answer(
-        f"✅ Номер: <b>{bike_number}</b>\n\n"
-        "Введите <b>модель</b> байка (например, Kugoo M4 Pro):",
+        f"✅ Номер: <b>{bike_number}</b>\n\nВведите <b>модель</b> байка (например, Kugoo M4 Pro):",
     )
 
 
@@ -122,8 +120,7 @@ async def process_model(
 
     await state.set_state(AddBikeForm.store)
     await message.answer(
-        f"✅ Модель: <b>{model_name}</b>\n\n"
-        "Выберите <b>склад</b>:",
+        f"✅ Модель: <b>{model_name}</b>\n\nВыберите <b>склад</b>:",
         reply_markup=store_select_kb(stores, purpose="add"),
     )
 

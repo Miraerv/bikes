@@ -71,21 +71,18 @@ async def cmd_menu(
     # Not authorized
     if not bot_user or not bot_user.is_approved:
         await message.answer(
-            "⛔ У вас нет доступа.\n"
-            "Нажмите /start для регистрации.",
+            "⛔ У вас нет доступа.\nНажмите /start для регистрации.",
         )
         return
 
     # Courier gets simplified menu
     if bot_user.is_courier:
         await message.answer(
-            "🚚 <b>Меню курьера</b>\n"
-            "Выберите действие:",
+            "🚚 <b>Меню курьера</b>\nВыберите действие:",
             reply_markup=courier_menu_kb(),
         )
     else:
         await message.answer(
-            "🏠 <b>Главное меню</b>\n"
-            "Выберите раздел:",
+            "🏠 <b>Главное меню</b>\nВыберите раздел:",
             reply_markup=main_menu_kb(),
         )

@@ -24,12 +24,16 @@ if TYPE_CHECKING:
 
 
 def registration_apply_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="📝 Отправить заявку",
-            callback_data=RegistrationCB(action="apply").pack(),
-        )],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📝 Отправить заявку",
+                    callback_data=RegistrationCB(action="apply").pack(),
+                ),
+            ],
+        ],
+    )
 
 
 def registration_share_contact_kb() -> ReplyKeyboardMarkup:
@@ -42,57 +46,69 @@ def registration_share_contact_kb() -> ReplyKeyboardMarkup:
 
 
 def admin_approval_kb(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="✅ Одобрить",
-                callback_data=AdminApprovalCB(
-                    user_id=user_id,
-                    action="approve",
-                ).pack(),
-            ),
-            InlineKeyboardButton(
-                text="❌ Отклонить",
-                callback_data=AdminApprovalCB(
-                    user_id=user_id,
-                    action="reject",
-                ).pack(),
-            ),
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Одобрить",
+                    callback_data=AdminApprovalCB(
+                        user_id=user_id,
+                        action="approve",
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=AdminApprovalCB(
+                        user_id=user_id,
+                        action="reject",
+                    ).pack(),
+                ),
+            ],
         ],
-    ])
+    )
 
 
 def admin_role_select_kb(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="👑 Админ",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id,
-                role="admin",
-            ).pack(),
-        )],
-        [InlineKeyboardButton(
-            text="📋 Супервайзер",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id,
-                role="supervisor",
-            ).pack(),
-        )],
-        [InlineKeyboardButton(
-            text="🔧 Мастер",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id,
-                role="mechanic",
-            ).pack(),
-        )],
-        [InlineKeyboardButton(
-            text="🚚 Курьер",
-            callback_data=AdminRoleSelectCB(
-                user_id=user_id,
-                role="courier",
-            ).pack(),
-        )],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👑 Админ",
+                    callback_data=AdminRoleSelectCB(
+                        user_id=user_id,
+                        role="admin",
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Супервайзер",
+                    callback_data=AdminRoleSelectCB(
+                        user_id=user_id,
+                        role="supervisor",
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔧 Мастер",
+                    callback_data=AdminRoleSelectCB(
+                        user_id=user_id,
+                        role="mechanic",
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚚 Курьер",
+                    callback_data=AdminRoleSelectCB(
+                        user_id=user_id,
+                        role="courier",
+                    ).pack(),
+                ),
+            ],
+        ],
+    )
 
 
 def admin_supervisor_store_kb(
@@ -105,33 +121,39 @@ def admin_supervisor_store_kb(
     for store in stores:
         is_selected = store.id in selected_store_ids
         prefix = "✅" if is_selected else "⬜️"
-        rows.append([
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{prefix} {store.display_name}",
+                    callback_data=AdminSupervisorStoreCB(
+                        user_id=user_id,
+                        store_id=store.id,
+                    ).pack(),
+                ),
+            ],
+        )
+
+    rows.append(
+        [
             InlineKeyboardButton(
-                text=f"{prefix} {store.display_name}",
-                callback_data=AdminSupervisorStoreCB(
+                text=f"💾 Сохранить ({len(selected_store_ids)})",
+                callback_data=AdminSupervisorStoreActionCB(
                     user_id=user_id,
-                    store_id=store.id,
+                    action="save",
                 ).pack(),
             ),
-        ])
-
-    rows.append([
-        InlineKeyboardButton(
-            text=f"💾 Сохранить ({len(selected_store_ids)})",
-            callback_data=AdminSupervisorStoreActionCB(
-                user_id=user_id,
-                action="save",
-            ).pack(),
-        ),
-    ])
-    rows.append([
-        InlineKeyboardButton(
-            text="← Назад к ролям",
-            callback_data=AdminSupervisorStoreActionCB(
-                user_id=user_id,
-                action="back",
-            ).pack(),
-        ),
-    ])
+        ],
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="← Назад к ролям",
+                callback_data=AdminSupervisorStoreActionCB(
+                    user_id=user_id,
+                    action="back",
+                ).pack(),
+            ),
+        ],
+    )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)

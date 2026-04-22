@@ -60,8 +60,6 @@ if TYPE_CHECKING:
 router = Router(name="breakdown")
 
 
-
-
 # ── Breakdown sub-menu ──────────────────────────────────────────────────
 
 
@@ -246,8 +244,7 @@ async def bd_receive_photo(
             await message.bot.delete_message(message.chat.id, old_msg_id)
 
     sent = await message.answer(
-        f"📷 Фото добавлено ({len(photo_ids)} шт.)\n\n"
-        "Отправьте ещё или нажмите «✅ Готово».",
+        f"📷 Фото добавлено ({len(photo_ids)} шт.)\n\nОтправьте ещё или нажмите «✅ Готово».",
         reply_markup=breakdown_photo_kb(),
     )
     await state.update_data(_bd_photo_msg_id=sent.message_id)
@@ -304,14 +301,12 @@ async def bd_search_courier(
 
     if not couriers:
         await message.answer(
-            f"🔍 По запросу «<b>{query_text}</b>» ничего не найдено.\n\n"
-            "Попробуйте другое имя:",
+            f"🔍 По запросу «<b>{query_text}</b>» ничего не найдено.\n\nПопробуйте другое имя:",
         )
         return
 
     await message.answer(
-        f"🔍 Найдено: <b>{len(couriers)}</b>\n\n"
-        "Выберите курьера:",
+        f"🔍 Найдено: <b>{len(couriers)}</b>\n\nВыберите курьера:",
         reply_markup=breakdown_courier_select_kb(couriers),
     )
 
@@ -474,8 +469,7 @@ async def show_breakdown_history(
 
     if not breakdowns:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            f"📋 <b>Поломки байка #{bike.bike_number}</b>\n\n"
-            "Поломок не зафиксировано.",
+            f"📋 <b>Поломки байка #{bike.bike_number}</b>\n\nПоломок не зафиксировано.",
             reply_markup=breakdown_history_kb(breakdowns, bike.id),
         )
         return

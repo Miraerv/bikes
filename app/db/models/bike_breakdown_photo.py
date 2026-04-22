@@ -26,15 +26,21 @@ class BikeBreakdownPhoto(MarketBase):
     photo_url: Mapped[str] = mapped_column(String(500), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     # — Relationships —
     breakdown: Mapped[BikeBreakdown] = relationship(
-        back_populates="photos", lazy="selectin",
+        back_populates="photos",
+        lazy="selectin",
     )
 
     def __repr__(self) -> str:

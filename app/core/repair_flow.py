@@ -136,9 +136,7 @@ async def list_repair_candidate_bikes(
 
 async def list_mechanics(session: AsyncSession) -> list[BotUser]:
     result = await session.execute(
-        select(BotUser)
-        .where(BotUser.role == UserRole.MECHANIC)
-        .order_by(BotUser.name),
+        select(BotUser).where(BotUser.role == UserRole.MECHANIC).order_by(BotUser.name),
     )
     return list(result.scalars().all())
 

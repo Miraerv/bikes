@@ -41,9 +41,7 @@ async def show_bike_card(
 
     # Load bike with store
     result = await market_session.execute(
-        select(Bike)
-        .options(selectinload(Bike.store))
-        .where(Bike.id == callback_data.bike_id),
+        select(Bike).options(selectinload(Bike.store)).where(Bike.id == callback_data.bike_id),
     )
     bike = result.scalar_one_or_none()
 

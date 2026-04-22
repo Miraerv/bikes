@@ -71,21 +71,27 @@ def bike_list_kb(
     nav_buttons: list[tuple[str, BikeListCB]] = []
 
     if page > 0:
-        nav_buttons.append((
-            "◀️",
-            BikeListCB(store_id=store_id, status=status, page=page - 1),
-        ))
+        nav_buttons.append(
+            (
+                "◀️",
+                BikeListCB(store_id=store_id, status=status, page=page - 1),
+            ),
+        )
 
-    nav_buttons.append((
-        f"📄 {page + 1}/{total_pages}",
-        BikeListCB(store_id=store_id, status=status, page=page),
-    ))
+    nav_buttons.append(
+        (
+            f"📄 {page + 1}/{total_pages}",
+            BikeListCB(store_id=store_id, status=status, page=page),
+        ),
+    )
 
     if (page + 1) < total_pages:
-        nav_buttons.append((
-            "▶️",
-            BikeListCB(store_id=store_id, status=status, page=page + 1),
-        ))
+        nav_buttons.append(
+            (
+                "▶️",
+                BikeListCB(store_id=store_id, status=status, page=page + 1),
+            ),
+        )
 
     for text, cb in nav_buttons:
         b.button(text=text, callback_data=cb)

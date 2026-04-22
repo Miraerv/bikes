@@ -13,7 +13,7 @@ def _load_json_store_ids(raw_store_ids: str | None) -> object | None:
 
     try:
         return cast("object", json.loads(raw_store_ids))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -23,7 +23,7 @@ def _coerce_store_id(value: object) -> int | None:
 
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

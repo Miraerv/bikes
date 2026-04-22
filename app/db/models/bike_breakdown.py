@@ -36,16 +36,24 @@ class BikeBreakdown(MarketBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     bike_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_bikes.id", ondelete="CASCADE"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_bikes.id", ondelete="CASCADE"),
+        nullable=False,
     )
     courier_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_admin_users.id"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_admin_users.id"),
+        nullable=False,
     )
     store_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_stores.id"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_stores.id"),
+        nullable=False,
     )
     reported_by: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_admin_users.id"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_admin_users.id"),
+        nullable=False,
     )
     breakdown_type: Mapped[BreakdownType] = mapped_column(
         Enum(BreakdownType, values_callable=lambda e: [x.value for x in e]),
@@ -55,23 +63,31 @@ class BikeBreakdown(MarketBase):
     reported_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     # — Relationships —
     bike: Mapped[Bike] = relationship(back_populates="breakdowns", lazy="selectin")
     courier: Mapped[AdminUser] = relationship(
-        foreign_keys=[courier_id], lazy="selectin",
+        foreign_keys=[courier_id],
+        lazy="selectin",
     )
     reporter: Mapped[AdminUser] = relationship(
-        foreign_keys=[reported_by], lazy="selectin",
+        foreign_keys=[reported_by],
+        lazy="selectin",
     )
     store: Mapped[Store] = relationship(lazy="selectin")
     photos: Mapped[list[BikeBreakdownPhoto]] = relationship(
-        back_populates="breakdown", cascade="all, delete-orphan",
+        back_populates="breakdown",
+        cascade="all, delete-orphan",
     )
     repairs: Mapped[list[BikeRepair]] = relationship(
         back_populates="breakdown",

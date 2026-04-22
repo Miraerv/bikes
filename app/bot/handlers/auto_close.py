@@ -22,8 +22,7 @@ async def auto_close_stale_logs() -> None:
     async with market_session_maker() as session:
         # Find stale logs for logging
         stale_result = await session.execute(
-            select(BikeUsageLog)
-            .where(
+            select(BikeUsageLog).where(
                 BikeUsageLog.ended_at.is_(None),
                 BikeUsageLog.started_at < threshold,
             ),

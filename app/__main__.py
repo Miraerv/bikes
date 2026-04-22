@@ -65,7 +65,10 @@ async def main() -> None:
     scheduler.add_job(check_low_bikes, "interval", minutes=alert_interval, args=[bot])
     scheduler.add_job(check_long_repairs, "interval", minutes=alert_interval, args=[bot])
     scheduler.add_job(
-        check_frequent_breakdowns, "interval", minutes=alert_interval, args=[bot],
+        check_frequent_breakdowns,
+        "interval",
+        minutes=alert_interval,
+        args=[bot],
     )
     for slot in NO_ONLINE_COURIER_SLOTS:
         _schedule_no_online_courier_check(scheduler, bot, slot)

@@ -98,8 +98,7 @@ async def take_choose_store(
 
     if not bot_user or not bot_user.admin_user_id:
         await callback.message.edit_text(  # type: ignore[union-attr]
-            "⚠️ Ваш аккаунт не привязан к системе.\n"
-            "Обратитесь к администратору.",
+            "⚠️ Ваш аккаунт не привязан к системе.\nОбратитесь к администратору.",
             reply_markup=courier_menu_kb(),
         )
         return
@@ -118,8 +117,8 @@ async def take_choose_store(
     # Show store selection
     result = await market_session.execute(
         select(Store)
-            .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
-            .order_by(Store.street),
+        .where(Store.main_id == "express", Store.id.notin_(settings.hidden_store_ids))
+        .order_by(Store.street),
     )
     stores = list(result.scalars().all())
 
@@ -324,8 +323,7 @@ async def return_start(
 
     # Find end records for this shift
     end_records = await market_session.execute(
-        select(CourierShiftBike.bike_number)
-        .where(
+        select(CourierShiftBike.bike_number).where(
             CourierShiftBike.shift_id == shift.id,
             CourierShiftBike.type == "end",
         ),
@@ -349,7 +347,8 @@ async def return_start(
         b.button(
             text=f"🔙 {record.bike_number} (с {taken_at})",
             callback_data=CourierReturnConfirmCB(
-                shift_bike_id=record.id, confirm=False,
+                shift_bike_id=record.id,
+                confirm=False,
             ),
         )
     b.button(text="← Назад", callback_data=CourierMenuCB(action="open"))
@@ -384,16 +383,15 @@ async def return_confirm(
     b.button(
         text="✅ Да, вернул",
         callback_data=CourierReturnConfirmCB(
-            shift_bike_id=record.id, confirm=True,
+            shift_bike_id=record.id,
+            confirm=True,
         ),
     )
     b.button(text="❌ Отмена", callback_data=CourierMenuCB(action="open"))
     b.adjust(2)
 
     await callback.message.edit_text(  # type: ignore[union-attr]
-        "⚠️ <b>Вернуть байк?</b>\n\n"
-        f"🚲 Номер: <b>{record.bike_number}</b>\n"
-        f"🕐 Взят: {taken_at}",
+        f"⚠️ <b>Вернуть байк?</b>\n\n🚲 Номер: <b>{record.bike_number}</b>\n🕐 Взят: {taken_at}",
         reply_markup=b.as_markup(),
     )
 
@@ -408,7 +406,8 @@ async def return_save(
     await callback.answer()
 
     start_record = await market_session.get(
-        CourierShiftBike, callback_data.shift_bike_id,
+        CourierShiftBike,
+        callback_data.shift_bike_id,
     )
     if not start_record:
         await callback.message.edit_text(  # type: ignore[union-attr]

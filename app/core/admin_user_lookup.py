@@ -39,14 +39,16 @@ async def find_admin_user_by_phone(
 
     for variant in phone_lookup_variants(phone_digits):
         result = await session.execute(
-            select(AdminUser).where(
+            select(AdminUser)
+            .where(
                 sql_func.replace(
                     sql_func.replace(AdminUser.phone, "+", ""),
                     " ",
                     "",
                 )
                 == variant,
-            ).limit(1),
+            )
+            .limit(1),
         )
         admin_user = result.scalar_one_or_none()
         if admin_user is not None:

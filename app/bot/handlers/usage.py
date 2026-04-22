@@ -149,6 +149,7 @@ async def take_choose_bike(
         reply_markup=usage_bike_select_kb(bikes, store_id),
     )
 
+
 @router.callback_query(TakeBikeForm.bike, UsageBikeSelectCB.filter())
 async def take_prompt_courier_search(
     callback: CallbackQuery,
@@ -177,8 +178,7 @@ async def take_prompt_courier_search(
     )
     await state.set_state(TakeBikeForm.courier_search)
     await callback.message.edit_text(  # type: ignore[union-attr]
-        "🔍 <b>Поиск курьера</b>\n\n"
-        "Введите имя или фамилию курьера:",
+        "🔍 <b>Поиск курьера</b>\n\nВведите имя или фамилию курьера:",
     )
 
 
@@ -207,10 +207,11 @@ async def take_courier_search(
 
     await state.set_state(TakeBikeForm.courier)
     await message.answer(
-        f"👤 Найдено: <b>{len(couriers)}</b>\n\n"
-        "Выберите курьера:",
+        f"👤 Найдено: <b>{len(couriers)}</b>\n\nВыберите курьера:",
         reply_markup=usage_courier_select_kb(
-            couriers, data["bike_id"], data["store_id"],
+            couriers,
+            data["bike_id"],
+            data["store_id"],
         ),
     )
 
@@ -341,7 +342,9 @@ async def return_show_active_logs(
 ) -> None:
     """Show active shifts at the selected store."""
     if callback_data.store_id > 0 and not await guard_store_access(
-        callback, bot_user, callback_data.store_id,
+        callback,
+        bot_user,
+        callback_data.store_id,
     ):
         return
     await callback.answer()
@@ -480,7 +483,9 @@ async def active_show_shifts(
 ) -> None:
     """Show all active shifts at the selected store."""
     if callback_data.store_id > 0 and not await guard_store_access(
-        callback, bot_user, callback_data.store_id,
+        callback,
+        bot_user,
+        callback_data.store_id,
     ):
         return
     await callback.answer()

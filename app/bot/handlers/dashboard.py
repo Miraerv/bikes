@@ -59,8 +59,10 @@ async def _get_stores_with_counts(
 
     # Aggregate counts per store
     query = apply_store_scope(
-        select(Bike.store_id, Bike.status, func.count(Bike.id))
-        .group_by(Bike.store_id, Bike.status),
+        select(Bike.store_id, Bike.status, func.count(Bike.id)).group_by(
+            Bike.store_id,
+            Bike.status,
+        ),
         Bike.store_id,
         bot_user,
     )

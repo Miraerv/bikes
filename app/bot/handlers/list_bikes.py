@@ -58,7 +58,9 @@ async def choose_status(
 ) -> None:
     """Show status filter after store is selected."""
     if callback_data.store_id > 0 and not await guard_store_access(
-        callback, bot_user, callback_data.store_id,
+        callback,
+        bot_user,
+        callback_data.store_id,
     ):
         return
     await callback.answer()
@@ -80,12 +82,19 @@ async def show_filtered_list(
 ) -> None:
     """Load bikes with filters and show paginated list (page 0)."""
     if callback_data.store_id > 0 and not await guard_store_access(
-        callback, bot_user, callback_data.store_id,
+        callback,
+        bot_user,
+        callback_data.store_id,
     ):
         return
     await callback.answer()
     await _show_bike_list(
-        callback, callback_data.store_id, callback_data.status, 0, market_session, bot_user,
+        callback,
+        callback_data.store_id,
+        callback_data.status,
+        0,
+        market_session,
+        bot_user,
     )
 
 
@@ -98,7 +107,9 @@ async def paginate_list(
 ) -> None:
     """Handle page navigation."""
     if callback_data.store_id > 0 and not await guard_store_access(
-        callback, bot_user, callback_data.store_id,
+        callback,
+        bot_user,
+        callback_data.store_id,
     ):
         return
     await callback.answer()

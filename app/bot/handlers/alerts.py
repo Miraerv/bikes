@@ -241,9 +241,7 @@ def _group_supervisor_incidents(
             continue
 
         supervisor_stores = [
-            store
-            for store_id, store in stores_by_id.items()
-            if store_id in supervisor_store_ids
+            store for store_id, store in stores_by_id.items() if store_id in supervisor_store_ids
         ]
         if supervisor_stores:
             groups.append((supervisor.telegram_id, supervisor_stores))
@@ -257,9 +255,7 @@ async def _get_supervisor_incident_groups(
 ) -> list[tuple[int, list[Store]]]:
     """Return affected stores for each configured supervisor."""
     result = await session.execute(
-        select(BotUser)
-        .where(BotUser.role == UserRole.SUPERVISOR)
-        .order_by(BotUser.id),
+        select(BotUser).where(BotUser.role == UserRole.SUPERVISOR).order_by(BotUser.id),
     )
     supervisors = list(result.scalars().all())
     return _group_supervisor_incidents(supervisors, incident_stores)
@@ -312,8 +308,7 @@ async def check_no_online_couriers(
             )
         except SQLAlchemyError:
             logger.exception(
-                "check_no_online_couriers: supervisor routing disabled "
-                "(store_ids may be missing)",
+                "check_no_online_couriers: supervisor routing disabled (store_ids may be missing)",
             )
             supervisor_groups = []
 
@@ -413,8 +408,7 @@ async def check_long_repairs(bot: Bot) -> None:
 
     async with market_session_maker() as session:
         result = await session.execute(
-            select(BikeRepair)
-            .where(
+            select(BikeRepair).where(
                 BikeRepair.completed_at.is_(None),
                 BikeRepair.picked_up_at < cutoff,
             ),
@@ -428,7 +422,9 @@ async def check_long_repairs(bot: Bot) -> None:
 
             # Dedup
             if await _has_recent_alert(
-                session, AlertType.REPAIR_TOO_LONG, bike_id=bike.id,
+                session,
+                AlertType.REPAIR_TOO_LONG,
+                bike_id=bike.id,
             ):
                 continue
 
@@ -486,7 +482,9 @@ async def check_frequent_breakdowns(bot: Bot) -> None:
         for bike_id, bd_count in rows:
             # Dedup
             if await _has_recent_alert(
-                session, AlertType.FREQUENT_BREAKDOWNS, bike_id=bike_id,
+                session,
+                AlertType.FREQUENT_BREAKDOWNS,
+                bike_id=bike_id,
             ):
                 continue
 

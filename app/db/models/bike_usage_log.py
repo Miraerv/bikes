@@ -21,33 +21,44 @@ class BikeUsageLog(MarketBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     bike_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_bikes.id", ondelete="CASCADE"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_bikes.id", ondelete="CASCADE"),
+        nullable=False,
     )
     courier_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_admin_users.id"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_admin_users.id"),
+        nullable=False,
     )
     store_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("boom_stores.id"), nullable=False,
+        BigInteger,
+        ForeignKey("boom_stores.id"),
+        nullable=False,
     )
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     # — Relationships —
     bike: Mapped[Bike] = relationship(back_populates="usage_logs", lazy="selectin")
     courier: Mapped[AdminUser] = relationship(
-        foreign_keys=[courier_id], lazy="selectin",
+        foreign_keys=[courier_id],
+        lazy="selectin",
     )
     store: Mapped[Store] = relationship(lazy="selectin")
 
     def __repr__(self) -> str:
         return (
-            f"<BikeUsageLog(id={self.id}, bike_id={self.bike_id}, "
-            f"courier_id={self.courier_id})>"
+            f"<BikeUsageLog(id={self.id}, bike_id={self.bike_id}, courier_id={self.courier_id})>"
         )

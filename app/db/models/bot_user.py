@@ -40,20 +40,29 @@ class BotUser(MarketBase):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(
-        BigInteger, unique=True, index=True, nullable=False,
+        BigInteger,
+        unique=True,
+        index=True,
+        nullable=False,
     )
     admin_user_id: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True,
+        BigInteger,
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     store_ids: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False,
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     @property
@@ -79,8 +88,10 @@ class BotUser(MarketBase):
     @property
     def is_approved(self) -> bool:
         return self.role in (
-            UserRole.ADMIN, UserRole.SUPERVISOR,
-            UserRole.MECHANIC, UserRole.COURIER,
+            UserRole.ADMIN,
+            UserRole.SUPERVISOR,
+            UserRole.MECHANIC,
+            UserRole.COURIER,
         )
 
     @property

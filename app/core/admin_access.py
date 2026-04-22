@@ -21,9 +21,7 @@ def is_admin_actor(bot_user: BotUser | None, telegram_id: int) -> bool:
 async def get_admin_telegram_ids(session: AsyncSession) -> list[int]:
     """Return unique admin telegram ids including the fallback admin id."""
     result = await session.execute(
-        select(BotUser.telegram_id)
-        .where(BotUser.role == UserRole.ADMIN)
-        .order_by(BotUser.id),
+        select(BotUser.telegram_id).where(BotUser.role == UserRole.ADMIN).order_by(BotUser.id),
     )
 
     recipients = [row[0] for row in result.all()]

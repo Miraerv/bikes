@@ -136,10 +136,12 @@ async def save_breakdown(
     await session.flush()
 
     for file_id in draft.photo_ids:
-        session.add(BikeBreakdownPhoto(
-            breakdown_id=breakdown.id,
-            photo_url=file_id,
-        ))
+        session.add(
+            BikeBreakdownPhoto(
+                breakdown_id=breakdown.id,
+                photo_url=file_id,
+            ),
+        )
 
     status_changed = False
     bike = await session.get(Bike, draft.bike_id)
