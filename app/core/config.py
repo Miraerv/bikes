@@ -12,6 +12,9 @@ class Settings(BaseSettings):
 
     # — Telegram —
     bot_token: str
+    # Telegram API proxy (when api.telegram.org is blocked / flaky)
+    use_tproxy: bool = False
+    tproxy_base: str = "https://tg.michaelmironov122.online"
 
     # — Database (boontar_market — single DB for everything) —
     db_host_market: str = "host.docker.internal"

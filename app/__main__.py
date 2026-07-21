@@ -2,6 +2,8 @@ import asyncio
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
@@ -51,9 +53,23 @@ async def main() -> None:
     setup_logging()
     logger.info("Starting Bikes Bot...")
 
+    if settings.use_tproxy:
+        tproxy = settings.tproxy_base.rstrip("/")
+        session = AiohttpSession(
+            api=TelegramAPIServer(
+                base=f"{tproxy}/bot{{token}}/{{method}}",
+                file=f"{tproxy}/file/bot{{token}}/{{path}}",
+            )
+        )
+        logger.info("Telegram API via tproxy: {}", tproxy)
+    else:
+        session = AiohttpSession()
+        logger.info("Telegram API direct (api.telegram.org)")
+
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=session,
     )
 
     dp = create_dispatcher()
